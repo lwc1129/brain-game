@@ -143,12 +143,13 @@ function pick3(lv){const p=[...QB[lv]];const o=[];while(o.length<3&&p.length){co
 function shareMsg(c){if(c===3)return'全對！腦力滿滿 💪';if(c===2)return'答對兩題，明天繼續！';if(c===1)return'答對一題，多走幾步挑簡單的！';return'今天先熱身，明天再接再厲 😄';}
 
 const TODAY=getToday();
+const APP_NAMESPACE='brain-game';
 let _data=null,_hist=null;
 
-async function loadData(){const def={steps:null,questions:null,answers:[],completed:false};try{const r=localStorage.getItem('today:'+TODAY);return r?JSON.parse(r):def;}catch{return def;}}
-async function saveData(){try{localStorage.setItem('today:'+TODAY,JSON.stringify(_data));}catch{}}
-async function loadHist(){try{const r=localStorage.getItem('history');return r?JSON.parse(r):{total:0,streak:0,lastDate:null,log:[]};}catch{return{total:0,streak:0,lastDate:null,log:[]};}}
-async function saveHist(){try{localStorage.setItem('history',JSON.stringify(_hist));}catch{}}
+async function loadData(){const def={steps:null,questions:null,answers:[],completed:false};try{const r=localStorage.getItem(`${APP_NAMESPACE}:today:${TODAY}`);return r?JSON.parse(r):def;}catch{return def;}}
+async function saveData(){try{localStorage.setItem(`${APP_NAMESPACE}:today:${TODAY}`,JSON.stringify(_data));}catch{}}
+async function loadHist(){try{const r=localStorage.getItem(`${APP_NAMESPACE}:history`);return r?JSON.parse(r):{total:0,streak:0,lastDate:null,log:[]};}catch{return{total:0,streak:0,lastDate:null,log:[]};}}
+async function saveHist(){try{localStorage.setItem(`${APP_NAMESPACE}:history`,JSON.stringify(_hist));}catch{}}
 
 async function init(){
   document.getElementById('todayDate').textContent=formatFull();
