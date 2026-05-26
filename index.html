@@ -201,6 +201,7 @@ function renderStep(){
     else db.style.display='none';
   });
   document.getElementById('startBtn').addEventListener('click',async()=>{
+    if(_data.completed){render();return;}
     const v=parseInt(document.getElementById('si').value);
     if(isNaN(v)||v<0){alert('請輸入有效步數');return;}
     _data.steps=v;_data.questions=pick3(getDiff(v).key);_data.answers=[];
@@ -288,6 +289,7 @@ function renderComplete(){
       <button class="btn-share" id="copyBtn" style="flex:1;margin:0;">📋 複製分享文字</button>
       <button class="btn-retry" id="retryBtn" style="flex:1;">重新挑戰</button>
     </div>
+    <button id="backBtn" style="width:100%;background:none;border:1px solid var(--line);border-radius:12px;color:var(--ink-soft);font-size:14px;cursor:pointer;padding:12px;font-family:'Noto Serif TC',serif;margin-bottom:14px;">← 返回主頁</button>
     <div class="stat-row">
       <div class="stat-box"><div class="sb-n">${_hist.total}</div><div class="sb-l">累積分數</div></div>
       <div class="stat-box"><div class="sb-n">🔥${_hist.streak}</div><div class="sb-l">連續達標天</div></div>
@@ -306,6 +308,7 @@ function renderComplete(){
       }).catch(()=>prompt('長按複製：',txt));
     }else{prompt('長按複製：',txt);}
   });
+  document.getElementById('backBtn').addEventListener('click',()=>{renderStep();});
   document.getElementById('retryBtn').addEventListener('click',async()=>{
     if(!confirm('重新挑戰？今日得分將扣除。'))return;
     _hist.total-=sc;_hist.log=_hist.log.filter(d=>d.date!==TODAY);
