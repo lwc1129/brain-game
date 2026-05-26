@@ -145,10 +145,10 @@ function shareMsg(c){if(c===3)return'全對！腦力滿滿 💪';if(c===2)return
 const TODAY=getToday();
 let _data=null,_hist=null;
 
-async function loadData(){const def={steps:null,questions:null,answers:[],completed:false};try{const r=await window.storage.get('today:'+TODAY);return r?JSON.parse(r.value):def;}catch{return def;}}
-async function saveData(){try{await window.storage.set('today:'+TODAY,JSON.stringify(_data));}catch{}}
-async function loadHist(){try{const r=await window.storage.get('history');return r?JSON.parse(r.value):{total:0,streak:0,lastDate:null,log:[]};}catch{return{total:0,streak:0,lastDate:null,log:[]};}}
-async function saveHist(){try{await window.storage.set('history',JSON.stringify(_hist));}catch{}}
+async function loadData(){const def={steps:null,questions:null,answers:[],completed:false};try{const r=localStorage.getItem('today:'+TODAY);return r?JSON.parse(r):def;}catch{return def;}}
+async function saveData(){try{localStorage.setItem('today:'+TODAY,JSON.stringify(_data));}catch{}}
+async function loadHist(){try{const r=localStorage.getItem('history');return r?JSON.parse(r):{total:0,streak:0,lastDate:null,log:[]};}catch{return{total:0,streak:0,lastDate:null,log:[]};}}
+async function saveHist(){try{localStorage.setItem('history',JSON.stringify(_hist));}catch{}}
 
 async function init(){
   document.getElementById('todayDate').textContent=formatFull();
