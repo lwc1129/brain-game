@@ -298,10 +298,13 @@ function renderComplete(){
     </div>
     <div class="fnote">完成後截圖或點複製，把今日成果傳給家人 😊</div>`;
   document.getElementById('copyBtn').addEventListener('click',()=>{
-    navigator.clipboard.writeText(txt).then(()=>{
-      const b=document.getElementById('copyBtn');b.textContent='✅ 已複製！';
-      setTimeout(()=>{b.textContent='📋 複製分享文字';},2000);
-    }).catch(()=>prompt('長按複製：',txt));
+    if(typeof navigator.clipboard?.writeText==='function'){
+      const b=document.getElementById('copyBtn');
+      navigator.clipboard.writeText(txt).then(()=>{
+        b.textContent='✅ 已複製！';
+        setTimeout(()=>{b.textContent='📋 複製分享文字';},2000);
+      }).catch(()=>prompt('長按複製：',txt));
+    }else{prompt('長按複製：',txt);}
   });
   document.getElementById('retryBtn').addEventListener('click',async()=>{
     if(!confirm('重新挑戰？今日得分將扣除。'))return;
