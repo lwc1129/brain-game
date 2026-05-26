@@ -160,7 +160,7 @@ async function init(){
 
 function render(){
   if(_data.completed){renderComplete();return;}
-  if(!_data.steps){renderStep();return;}
+  if(_data.steps==null){renderStep();return;}
   renderQ();
 }
 
