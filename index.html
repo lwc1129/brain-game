@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>每日認知挑戰</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@400;600;700;900&family=Fraunces:opsz,wght@9..144,400;9..144,700;9..144,900&display=swap');
+  :root {
+    --bg:#faf5ec;--paper:#fffbf2;--ink:#2a1f15;--ink-soft:#6b5d4f;
+    --accent:#c8431a;--accent-soft:#e8a87c;--gold:#b88a3e;--green:#5a7a3a;--line:#d9cdb4;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{background:var(--bg);color:var(--ink);font-family:'Noto Serif TC',serif;min-height:100vh;
+    padding:20px 16px 60px;
+    background-image:radial-gradient(circle at 20% 20%,rgba(232,168,124,.08) 0%,transparent 40%),
+                     radial-gradient(circle at 80% 70%,rgba(200,67,26,.05) 0%,transparent 40%);}
+  .container{max-width:480px;margin:0 auto;}
+  header{text-align:center;margin-bottom:24px;padding-bottom:18px;border-bottom:2px solid var(--line);}
+  .hmark{font-family:'Fraunces',serif;font-size:12px;letter-spacing:6px;color:var(--accent);text-transform:uppercase;margin-bottom:6px;}
+  h1{font-weight:900;font-size:30px;letter-spacing:3px;margin-bottom:4px;}
+  .hsub{font-size:13px;color:var(--ink-soft);}
+  .hdate{font-family:'Fraunces',serif;font-size:13px;color:var(--gold);margin-top:6px;}
+  .card{background:var(--paper);border:1px solid var(--line);border-radius:16px;padding:22px;margin-bottom:14px;box-shadow:0 2px 12px rgba(42,31,21,.04);}
+  .stitle{font-size:12px;letter-spacing:3px;color:var(--accent);margin-bottom:14px;font-weight:700;}
+  .step-row{display:flex;align-items:center;gap:10px;margin-bottom:12px;}
+  .step-row input{flex:1;padding:16px;border:2px solid var(--line);border-radius:12px;font-size:26px;font-weight:700;text-align:center;background:var(--bg);color:var(--ink);font-family:'Fraunces',serif;}
+  .step-row input:focus{outline:none;border-color:var(--accent);}
+  .step-unit{font-size:15px;color:var(--ink-soft);font-weight:600;white-space:nowrap;}
+  .diff-badge{display:flex;align-items:center;gap:6px;padding:10px 14px;border-radius:10px;font-size:14px;font-weight:600;border-left:4px solid var(--accent-soft);background:var(--bg);margin-bottom:12px;width:100%;}
+  .diff-badge strong{color:var(--accent);}
+  .btn-main{width:100%;background:var(--ink);color:var(--paper);border:none;padding:16px;border-radius:12px;font-size:17px;font-weight:700;cursor:pointer;font-family:'Noto Serif TC',serif;letter-spacing:2px;transition:background .2s;}
+  .btn-main:hover{background:var(--accent);}
+  .question-card{background:var(--paper);border:1px solid var(--line);border-radius:16px;padding:22px;margin-bottom:12px;box-shadow:0 2px 12px rgba(42,31,21,.04);transition:opacity .2s;}
+  .question-card.done{opacity:.55;background:var(--bg);}
+  .q-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;padding-bottom:10px;border-bottom:1px dashed var(--line);}
+  .q-num{font-family:'Fraunces',serif;font-size:13px;color:var(--gold);letter-spacing:2px;font-weight:700;}
+  .q-tag{font-size:11px;padding:3px 10px;border-radius:10px;background:rgba(184,138,62,.15);color:var(--gold);letter-spacing:1px;font-weight:600;}
+  .q-text{font-size:20px;line-height:1.65;margin-bottom:18px;font-weight:500;}
+  .q-options{display:flex;flex-direction:column;gap:9px;}
+  .q-opt{background:var(--bg);border:2px solid var(--line);border-radius:11px;padding:14px 16px;font-size:17px;cursor:pointer;transition:all .15s;color:var(--ink);font-family:'Noto Serif TC',serif;text-align:left;font-weight:500;}
+  .q-opt:hover:not([disabled]){border-color:var(--accent-soft);transform:translateX(2px);}
+  .q-opt.correct{background:var(--green);color:white;border-color:var(--green);}
+  .q-opt.wrong{background:var(--accent);color:white;border-color:var(--accent);}
+  .q-result{margin-top:12px;padding:11px 14px;border-radius:9px;font-size:14px;display:none;}
+  .q-result.show{display:block;}
+  .q-result.ok{background:rgba(90,122,58,.12);color:var(--green);border-left:3px solid var(--green);}
+  .q-result.fail{background:rgba(200,67,26,.08);color:var(--accent);border-left:3px solid var(--accent);}
+  .share-card{background:linear-gradient(135deg,#c8431a 0%,#d96d3f 60%,#b88a3e 100%);border-radius:20px;padding:30px 24px;margin-bottom:14px;text-align:center;color:white;box-shadow:0 10px 28px rgba(200,67,26,.3);position:relative;overflow:hidden;}
+  .share-card::before{content:'';position:absolute;top:-30px;right:-30px;width:120px;height:120px;background:rgba(255,255,255,.07);border-radius:50%;}
+  .share-card::after{content:'';position:absolute;bottom:-20px;left:-20px;width:80px;height:80px;background:rgba(255,255,255,.05);border-radius:50%;}
+  .se{font-size:44px;margin-bottom:10px;}
+  .sd{font-size:12px;letter-spacing:3px;opacity:.8;margin-bottom:10px;font-family:'Fraunces',serif;}
+  .st{font-size:22px;font-weight:900;letter-spacing:2px;margin-bottom:20px;}
+  .share-stats{display:flex;justify-content:center;gap:12px;margin-bottom:18px;}
+  .ss{background:rgba(255,255,255,.18);border-radius:14px;padding:12px 16px;backdrop-filter:blur(4px);}
+  .ss-n{font-family:'Fraunces',serif;font-size:28px;font-weight:900;line-height:1;margin-bottom:4px;}
+  .ss-l{font-size:11px;opacity:.85;letter-spacing:1px;}
+  .sdiff{display:inline-block;background:rgba(255,255,255,.2);border-radius:20px;padding:6px 16px;font-size:13px;margin-bottom:16px;letter-spacing:1px;}
+  .smsg{font-size:15px;opacity:.92;line-height:1.6;margin-bottom:14px;font-weight:500;}
+  .sstreak{font-size:13px;opacity:.75;margin-bottom:16px;}
+  .sdots{font-size:22px;margin-bottom:4px;}
+  .btn-share{background:white;color:var(--accent);border:none;padding:13px 24px;border-radius:24px;font-size:15px;font-weight:700;cursor:pointer;font-family:'Noto Serif TC',serif;letter-spacing:1px;margin-right:8px;transition:transform .15s;}
+  .btn-share:hover{transform:scale(1.03);}
+  .btn-retry{background:rgba(255,255,255,.2);color:white;border:1.5px solid rgba(255,255,255,.4);padding:13px 18px;border-radius:24px;font-size:14px;font-weight:600;cursor:pointer;font-family:'Noto Serif TC',serif;transition:background .15s;}
+  .btn-retry:hover{background:rgba(255,255,255,.3);}
+  .stat-row{display:flex;gap:10px;margin-bottom:14px;}
+  .stat-box{flex:1;background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:14px 10px;text-align:center;}
+  .sb-n{font-family:'Fraunces',serif;font-size:26px;font-weight:900;color:var(--accent);line-height:1;margin-bottom:4px;}
+  .sb-l{font-size:11px;color:var(--ink-soft);letter-spacing:1px;}
+  .history-card{background:var(--paper);border:1px solid var(--line);border-radius:16px;padding:18px 20px;margin-bottom:14px;}
+  .history-row{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--line);font-size:14px;}
+  .history-row:last-child{border-bottom:none;}
+  .hr-date{color:var(--ink-soft);font-family:'Fraunces',serif;}
+  .hr-info{color:var(--ink);font-weight:600;}
+  .hr-score{font-family:'Fraunces',serif;font-size:18px;color:var(--accent);font-weight:700;}
+  .fnote{text-align:center;margin-top:20px;font-size:11px;color:var(--ink-soft);line-height:1.8;}
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <div class="hmark">DAILY BRAIN</div>
+    <h1>每日認知挑戰</h1>
+    <div class="hsub">走得多，題目輕鬆；走得少，多動腦補回來</div>
+    <div class="hdate" id="todayDate"></div>
+  </header>
+  <div id="mainArea"></div>
+</div>
+
+<script>
+const QB={
+  hard:[
+    {type:'邏輯',q:'小明比小華大3歲，小華比小芳小5歲。若小芳今年20歲，小明幾歲？',a:'18歲',opts:['18歲','15歲','22歲','20歲']},
+    {type:'計算',q:'一條繩子對折三次後長12公分，原本長幾公分？',a:'96',opts:['96','36','48','72']},
+    {type:'數列',q:'2、6、12、20、30、？',a:'42',opts:['42','40','36','44']},
+    {type:'計算',q:'15 × 12 − 8 × 9 = ？',a:'108',opts:['108','96','120','88']},
+    {type:'推理',q:'今天星期三，18天後是星期幾？',a:'星期日',opts:['星期日','星期六','星期一','星期五']},
+    {type:'邏輯',q:'若所有A都是B，所有B都是C，以下何者必定為真？',a:'所有A都是C',opts:['所有A都是C','所有C都是A','有些B不是C','有些A不是B']},
+    {type:'語言',q:'「滄海桑田」最接近哪個成語？',a:'物換星移',opts:['物換星移','海枯石爛','波瀾壯闊','一帆風順']},
+    {type:'記憶',q:'記住順序：紅藍黃綠紫橙，第五個是？',a:'紫',opts:['紫','綠','橙','藍']},
+  ],
+  medium:[
+    {type:'計算',q:'36 + 47 = ？',a:'83',opts:['83','73','93','81']},
+    {type:'計算',q:'一杯65元，買4杯共多少錢？',a:'260',opts:['260','240','280','255']},
+    {type:'推理',q:'今天星期三，10天後是星期幾？',a:'星期六',opts:['星期六','星期五','星期日','星期四']},
+    {type:'語言',q:'「畫蛇添足」是什麼意思？',a:'多此一舉',opts:['多此一舉','錦上添花','畫龍點睛','半途而廢']},
+    {type:'數列',q:'5、10、15、20、？',a:'25',opts:['25','30','22','28']},
+    {type:'計算',q:'120 ÷ 4 = ？',a:'30',opts:['30','25','40','20']},
+    {type:'記憶',q:'順序：北東南西北東，第五個方向是？',a:'北',opts:['北','東','南','西']},
+    {type:'計算',q:'7 × 8 = ？',a:'56',opts:['56','48','64','54']},
+    {type:'語言',q:'「春」的相反季節是？',a:'秋',opts:['秋','冬','夏','梅雨']},
+  ],
+  easy:[
+    {type:'計算',q:'15 + 8 = ？',a:'23',opts:['23','21','25','24']},
+    {type:'計算',q:'50 ÷ 5 = ？',a:'10',opts:['10','8','12','5']},
+    {type:'常識',q:'太陽從哪個方向升起？',a:'東方',opts:['東方','西方','南方','北方']},
+    {type:'語言',q:'「大」的相反字是？',a:'小',opts:['小','高','長','多']},
+    {type:'常識',q:'一年有幾個月？',a:'12個月',opts:['12個月','10個月','11個月','13個月']},
+    {type:'計算',q:'6 × 7 = ？',a:'42',opts:['42','36','48','40']},
+    {type:'常識',q:'台灣最高的山是？',a:'玉山',opts:['玉山','雪山','合歡山','大霸尖山']},
+    {type:'計算',q:'100 − 37 = ？',a:'63',opts:['63','73','53','67']},
+    {type:'語言',q:'「貓」的英文是？',a:'cat',opts:['cat','dog','bird','fish']},
+  ],
+  super_easy:[
+    {type:'計算',q:'2 + 3 = ？',a:'5',opts:['5','4','6','7']},
+    {type:'計算',q:'10 − 4 = ？',a:'6',opts:['6','5','7','8']},
+    {type:'常識',q:'蘋果最常見是什麼顏色？',a:'紅色',opts:['紅色','藍色','黑色','紫色']},
+    {type:'常識',q:'魚生活在哪裡？',a:'水裡',opts:['水裡','天上','土裡','樹上']},
+    {type:'計算',q:'5 + 5 = ？',a:'10',opts:['10','9','11','15']},
+    {type:'常識',q:'一天有幾小時？',a:'24小時',opts:['24小時','12小時','20小時','48小時']},
+    {type:'常識',q:'香蕉成熟時是什麼顏色？',a:'黃色',opts:['黃色','紅色','綠色','藍色']},
+    {type:'計算',q:'3 × 3 = ？',a:'9',opts:['9','6','12','8']},
+    {type:'常識',q:'一個星期有幾天？',a:'7天',opts:['7天','5天','6天','8天']},
+    {type:'語言',q:'「上」的相反字是？',a:'下',opts:['下','左','右','中']},
+  ],
+};
+
+function getToday(){const d=new Date();return`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;}
+function formatFull(){const d=new Date();const w=['日','一','二','三','四','五','六'];return`${d.getFullYear()} 年 ${d.getMonth()+1} 月 ${d.getDate()} 日　星期${w[d.getDay()]}`;}
+function getDiff(s){if(s<2000)return{key:'hard',label:'困難 💪',msg:'走得少，來動動腦補一補！'};if(s<4000)return{key:'medium',label:'中等 😊',msg:'繼續加油，身體和腦子都要動！'};if(s<6000)return{key:'easy',label:'簡單 👍',msg:'走得不錯！獎勵輕鬆題目～'};return{key:'super_easy',label:'超簡單 🎉',msg:'太厲害了！今天大步走！'};}
+function pick3(lv){const p=[...QB[lv]];const o=[];while(o.length<3&&p.length){const i=Math.floor(Math.random()*p.length);o.push(p.splice(i,1)[0]);}return o;}
+function shareMsg(c){if(c===3)return'全對！腦力滿滿 💪';if(c===2)return'答對兩題，明天繼續！';if(c===1)return'答對一題，多走幾步挑簡單的！';return'今天先熱身，明天再接再厲 😄';}
+
+const TODAY=getToday();
+let _data=null,_hist=null;
+
+async function loadData(){const def={steps:null,questions:null,answers:[],completed:false};try{const r=await window.storage.get('today:'+TODAY);return r?JSON.parse(r.value):def;}catch{return def;}}
+async function saveData(){try{await window.storage.set('today:'+TODAY,JSON.stringify(_data));}catch{}}
+async function loadHist(){try{const r=await window.storage.get('history');return r?JSON.parse(r.value):{total:0,streak:0,lastDate:null,log:[]};}catch{return{total:0,streak:0,lastDate:null,log:[]};}}
+async function saveHist(){try{await window.storage.set('history',JSON.stringify(_hist));}catch{}}
+
+async function init(){
+  document.getElementById('todayDate').textContent=formatFull();
+  _data=await loadData();
+  _hist=await loadHist();
+  render();
+}
+
+function render(){
+  if(_data.completed){renderComplete();return;}
+  if(!_data.steps){renderStep();return;}
+  renderQ();
+}
+
+function renderStep(){
+  const m=document.getElementById('mainArea');
+  const histH=_hist.log.length?`
+    <div class="stat-row">
+      <div class="stat-box"><div class="sb-n">${_hist.total}</div><div class="sb-l">累積分數</div></div>
+      <div class="stat-box"><div class="sb-n">🔥${_hist.streak}</div><div class="sb-l">連續達標天</div></div>
+      <div class="stat-box"><div class="sb-n">${_hist.log.length}</div><div class="sb-l">累積天數</div></div>
+    </div>`:'';
+  const logH=_hist.log.length?`
+    <div class="history-card">
+      <div class="stitle">📅 最近記錄</div>
+      ${_hist.log.slice(-5).reverse().map(d=>`
+        <div class="history-row">
+          <span class="hr-date">${d.date.replace(/-/g,'/')}</span>
+          <span class="hr-info">👟${Number(d.steps).toLocaleString()}步　✓${d.correct}/3</span>
+          <span class="hr-score">+${d.score}</span>
+        </div>`).join('')}
+    </div>`:'';
+  m.innerHTML=`${histH}
+    <div class="card">
+      <div class="stitle">👟 今天走了幾步？</div>
+      <div class="step-row">
+        <input type="number" id="si" placeholder="例：4500" min="0" max="99999" inputmode="numeric">
+        <span class="step-unit">步</span>
+      </div>
+      <div id="db" class="diff-badge" style="display:none;"></div>
+      <button class="btn-main" id="startBtn">開始今日挑戰</button>
+    </div>
+    ${logH}
+    <div class="fnote">&lt;2000步 困難｜2000-4000 中等｜4000-6000 簡單｜&gt;6000 超簡單<br>每答對一題 +10 分，全對額外 +5 分<br>步數達3000以上計入連續達標天數</div>`;
+
+  document.getElementById('si').addEventListener('input',function(){
+    const v=parseInt(this.value);const db=document.getElementById('db');
+    if(!isNaN(v)&&v>=0){const d=getDiff(v);db.innerHTML=`難度：<strong>${d.label}</strong>　${d.msg}`;db.style.display='flex';}
+    else db.style.display='none';
+  });
+  document.getElementById('startBtn').addEventListener('click',async()=>{
+    const v=parseInt(document.getElementById('si').value);
+    if(isNaN(v)||v<0){alert('請輸入有效步數');return;}
+    _data.steps=v;_data.questions=pick3(getDiff(v).key);_data.answers=[];
+    await saveData();render();
+  });
+}
+
+function renderQ(){
+  const m=document.getElementById('mainArea');
+  const diff=getDiff(_data.steps);
+  const qH=_data.questions.map((q,i)=>{
+    const ans=_data.answers[i];const answered=ans!==undefined;const ok=answered&&ans===q.a;
+    const opts=q.opts.map(o=>{
+      let c='q-opt';if(answered){if(o===q.a)c+=' correct';else if(o===ans)c+=' wrong';}
+      return`<button class="${c}" data-i="${i}" data-o="${o}" ${answered?'disabled':''}>${o}</button>`;
+    }).join('');
+    const res=answered?`<div class="q-result show ${ok?'ok':'fail'}">${ok?'✓ 答對了！+10分':'✗ 正確答案是「'+q.a+'」'}</div>`:'';
+    return`<div class="question-card ${answered?'done':''}">
+      <div class="q-header"><div class="q-num">第 ${i+1} 題 / 3</div><div class="q-tag">${q.type}｜${diff.label}</div></div>
+      <div class="q-text">${q.q}</div>
+      <div class="q-options">${opts}</div>${res}</div>`;
+  }).join('');
+  const allDone=_data.answers.length===3&&_data.questions.every((_,i)=>_data.answers[i]!==undefined);
+  m.innerHTML=`
+    <div class="card" style="padding:14px 18px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <span style="font-size:13px;color:var(--ink-soft);">今日步數</span>
+        <span style="font-family:'Fraunces',serif;font-size:22px;font-weight:700;">${Number(_data.steps).toLocaleString()} 步</span>
+      </div>
+      <div style="font-size:13px;color:var(--accent);text-align:right;margin-top:2px;">${diff.label}</div>
+    </div>
+    ${qH}
+    ${allDone?`<button class="btn-main" id="finishBtn" style="background:var(--accent);">完成！查看今日成果</button>`:''}`;
+  document.querySelectorAll('.q-opt:not([disabled])').forEach(b=>{
+    b.addEventListener('click',async()=>{
+      const i=parseInt(b.dataset.i);if(_data.answers[i]!==undefined)return;
+      _data.answers[i]=b.dataset.o;await saveData();render();
+    });
+  });
+  const fb=document.getElementById('finishBtn');
+  if(fb)fb.addEventListener('click',async()=>{
+    _data.completed=true;
+    const c=_data.answers.filter((a,i)=>a===_data.questions[i].a).length;
+    const sc=c*10+(c===3?5:0);
+    const yd=new Date(Date.now()-86400000);
+    const ydS=`${yd.getFullYear()}-${String(yd.getMonth()+1).padStart(2,'0')}-${String(yd.getDate()).padStart(2,'0')}`;
+    if(_data.steps>=3000){if(_hist.lastDate===ydS)_hist.streak+=1;else if(_hist.lastDate!==TODAY)_hist.streak=1;_hist.lastDate=TODAY;}
+    _hist.total+=sc;
+    _hist.log.push({date:TODAY,steps:_data.steps,correct:c,score:sc});
+    if(_hist.log.length>30)_hist.log=_hist.log.slice(-30);
+    await saveData();await saveHist();render();
+  });
+}
+
+function renderComplete(){
+  const m=document.getElementById('mainArea');
+  const c=_data.answers.filter((a,i)=>a===_data.questions[i].a).length;
+  const sc=c*10+(c===3?5:0);
+  const diff=getDiff(_data.steps);
+  const emoji=c===3?'🏆':c===2?'🎯':c===1?'💡':'🌱';
+  const dots=_data.questions.map((_,i)=>_data.answers[i]===_data.questions[i].a?'🟢':'🔴').join(' ');
+  const txt=`📅 ${TODAY.replace(/-/g,'/')}\n👟 今日步數：${Number(_data.steps).toLocaleString()} 步\n🧠 答題成績：${c}/3 題\n${dots}\n${shareMsg(c)}\n每日認知挑戰 ✨`;
+  const logH=_hist.log.length?_hist.log.slice(-5).reverse().map(d=>`
+    <div class="history-row">
+      <span class="hr-date">${d.date.replace(/-/g,'/')}</span>
+      <span class="hr-info">👟${Number(d.steps).toLocaleString()}步　✓${d.correct}/3</span>
+      <span class="hr-score">+${d.score}</span>
+    </div>`).join(''):'<div style="color:var(--ink-soft);font-size:13px;padding:8px 0;">尚無記錄</div>';
+  m.innerHTML=`
+    <div class="share-card">
+      <div class="se">${emoji}</div>
+      <div class="sd">${TODAY.replace(/-/g,'/')}　每日認知挑戰</div>
+      <div class="st">今日完成！</div>
+      <div class="share-stats">
+        <div class="ss"><div class="ss-n">${Number(_data.steps).toLocaleString()}</div><div class="ss-l">今日步數</div></div>
+        <div class="ss"><div class="ss-n">${c} / 3</div><div class="ss-l">答對題數</div></div>
+        <div class="ss"><div class="ss-n">+${sc}</div><div class="ss-l">今日得分</div></div>
+      </div>
+      <div class="sdiff">${diff.label}</div>
+      <div class="smsg">${shareMsg(c)}</div>
+      <div class="sstreak">🔥 連續達標 ${_hist.streak} 天｜累積 ${_hist.total} 分</div>
+      <div class="sdots">${dots}</div>
+    </div>
+    <div style="display:flex;gap:10px;margin-bottom:14px;">
+      <button class="btn-share" id="copyBtn" style="flex:1;margin:0;">📋 複製分享文字</button>
+      <button class="btn-retry" id="retryBtn" style="flex:1;">重新挑戰</button>
+    </div>
+    <div class="stat-row">
+      <div class="stat-box"><div class="sb-n">${_hist.total}</div><div class="sb-l">累積分數</div></div>
+      <div class="stat-box"><div class="sb-n">🔥${_hist.streak}</div><div class="sb-l">連續達標天</div></div>
+      <div class="stat-box"><div class="sb-n">${_hist.log.length}</div><div class="sb-l">累積天數</div></div>
+    </div>
+    <div class="history-card">
+      <div class="stitle">📅 最近記錄</div>${logH}
+    </div>
+    <div class="fnote">完成後截圖或點複製，把今日成果傳給家人 😊</div>`;
+  document.getElementById('copyBtn').addEventListener('click',()=>{
+    navigator.clipboard.writeText(txt).then(()=>{
+      const b=document.getElementById('copyBtn');b.textContent='✅ 已複製！';
+      setTimeout(()=>{b.textContent='📋 複製分享文字';},2000);
+    }).catch(()=>prompt('長按複製：',txt));
+  });
+  document.getElementById('retryBtn').addEventListener('click',async()=>{
+    if(!confirm('重新挑戰？今日得分將扣除。'))return;
+    _hist.total-=sc;_hist.log=_hist.log.filter(d=>d.date!==TODAY);
+    _data={steps:null,questions:null,answers:[],completed:false};
+    await saveData();await saveHist();render();
+  });
+}
+
+init();
+</script>
+</body>
+</html>
