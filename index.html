@@ -138,7 +138,7 @@ const QB={
 
 function getToday(){const d=new Date();return`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;}
 function formatFull(){const d=new Date();const w=['日','一','二','三','四','五','六'];return`${d.getFullYear()} 年 ${d.getMonth()+1} 月 ${d.getDate()} 日　星期${w[d.getDay()]}`;}
-function getDiff(s){if(s<2000)return{key:'hard',label:'困難 💪',msg:'走得少，來動動腦補一補！'};if(s<4000)return{key:'medium',label:'中等 😊',msg:'繼續加油，身體和腦子都要動！'};if(s<6000)return{key:'easy',label:'簡單 👍',msg:'走得不錯！獎勵輕鬆題目～'};return{key:'super_easy',label:'超簡單 🎉',msg:'太厲害了！今天大步走！'};}
+function getDiff(s){if(s<2000)return{key:'hard',label:'困難 💪',msg:'走得少，來動動腦補一補！'};if(s<=4000)return{key:'medium',label:'中等 😊',msg:'繼續加油，身體和腦子都要動！'};if(s<=6000)return{key:'easy',label:'簡單 👍',msg:'走得不錯！獎勵輕鬆題目～'};return{key:'super_easy',label:'超簡單 🎉',msg:'太厲害了！今天大步走！'};}
 function pick3(lv){const p=[...QB[lv]];const o=[];while(o.length<3&&p.length){const i=Math.floor(Math.random()*p.length);o.push(p.splice(i,1)[0]);}return o;}
 function shareMsg(c){if(c===3)return'全對！腦力滿滿 💪';if(c===2)return'答對兩題，明天繼續！';if(c===1)return'答對一題，多走幾步挑簡單的！';return'今天先熱身，明天再接再厲 😄';}
 
