@@ -161,6 +161,8 @@ function buildGeminiPrompt(diffKey){
 }
 
 async function fetchGeminiQuestions(diffKey){
+  const cacheKey=`${APP_NAMESPACE}:ai-cache:${TODAY}`;
+  try{const c=localStorage.getItem(cacheKey);if(c){const p=JSON.parse(c);if(Array.isArray(p)&&p.length===3)return p;}}catch{}
   const ctrl=new AbortController();
   const t=setTimeout(()=>ctrl.abort(),10000);
   try{
@@ -176,6 +178,7 @@ async function fetchGeminiQuestions(diffKey){
     if(!m)return null;
     const qs=JSON.parse(m[0]);
     if(!Array.isArray(qs)||qs.length<3||!qs.every(q=>typeof q.type==='string'&&typeof q.q==='string'&&typeof q.a==='string'&&Array.isArray(q.opts)&&q.opts.length===4&&q.opts.includes(q.a)))return null;
+    try{localStorage.setItem(cacheKey,JSON.stringify(qs.slice(0,3)));}catch{}
     return qs.slice(0,3);
   }catch{clearTimeout(t);return null;}
 }
