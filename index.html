@@ -62,8 +62,8 @@
   .sdots{font-size:22px;margin-bottom:4px;}
   .btn-share{background:white;color:var(--accent);border:none;padding:13px 24px;border-radius:24px;font-size:15px;font-weight:700;cursor:pointer;font-family:'Noto Serif TC',serif;letter-spacing:1px;margin-right:8px;transition:transform .15s;}
   .btn-share:hover{transform:scale(1.03);}
-  .btn-retry{background:rgba(255,255,255,.2);color:white;border:1.5px solid rgba(255,255,255,.4);padding:13px 18px;border-radius:24px;font-size:14px;font-weight:600;cursor:pointer;font-family:'Noto Serif TC',serif;transition:background .15s;}
-  .btn-retry:hover{background:rgba(255,255,255,.3);}
+  .btn-retry{background:white;color:var(--accent);border:1.5px solid white;padding:13px 18px;border-radius:24px;font-size:14px;font-weight:600;cursor:pointer;font-family:'Noto Serif TC',serif;transition:transform .15s,opacity .15s;}
+  .btn-retry:hover{transform:scale(1.03);opacity:.92;}
   .stat-row{display:flex;gap:10px;margin-bottom:14px;}
   .stat-box{flex:1;background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:14px 10px;text-align:center;}
   .sb-n{font-family:'Fraunces',serif;font-size:26px;font-weight:900;color:var(--accent);line-height:1;margin-bottom:4px;}
@@ -153,7 +153,7 @@ const TODAY=getToday();
 const APP_NAMESPACE='brain-game';
 let _data=null,_hist=null;
 
-async function loadData(){const def={steps:null,questions:null,answers:[],completed:false,aiGenerated:false};try{const r=localStorage.getItem(`${APP_NAMESPACE}:today:${TODAY}`);return r?JSON.parse(r):def;}catch{return def;}}
+async function loadData(){const def={steps:null,questions:null,answers:[],completed:false,aiGenerated:false};try{const r=localStorage.getItem(`${APP_NAMESPACE}:today:${TODAY}`);if(!r)return def;return{...def,...JSON.parse(r)};}catch{return def;}}
 async function saveData(){try{localStorage.setItem(`${APP_NAMESPACE}:today:${TODAY}`,JSON.stringify(_data));}catch{}}
 async function loadHist(){try{const r=localStorage.getItem(`${APP_NAMESPACE}:history`);return r?JSON.parse(r):{total:0,streak:0,lastDate:null,log:[]};}catch{return{total:0,streak:0,lastDate:null,log:[]};}}
 async function saveHist(){try{localStorage.setItem(`${APP_NAMESPACE}:history`,JSON.stringify(_hist));}catch{}}
@@ -177,6 +177,24 @@ function bumpAiRetryVersion(){
 function readAiCache(diffKey){
   try{const c=localStorage.getItem(getAiCacheKey(diffKey));if(c){const p=JSON.parse(c);if(Array.isArray(p)&&p.length===3)return p;}}catch{}
   return null;
+}
+
+function markAiGeneratedForDiff(diffKey){
+  try{localStorage.setItem(`${APP_NAMESPACE}:ai-flag:${getAiCacheKey(diffKey)}`,'1');}catch{}
+}
+
+function isAiGeneratedForDiff(diffKey){
+  try{return localStorage.getItem(`${APP_NAMESPACE}:ai-flag:${getAiCacheKey(diffKey)}`)==='1';}catch{return false;}
+}
+
+function syncAiGeneratedFlag(){
+  if(!_data?.questions||_data.steps==null||_data.aiGenerated)return;
+  const diffKey=getDiff(_data.steps).key;
+  if(isAiGeneratedForDiff(diffKey))_data.aiGenerated=true;
+}
+
+function aiBannerHtml(){
+  return _data.aiGenerated?`<div style="background:linear-gradient(135deg,rgba(200,67,26,.1) 0%,rgba(184,138,62,.08) 100%);border:1px solid var(--accent-soft);border-radius:14px;padding:14px 18px;margin-bottom:14px;text-align:center;"><div style="font-size:14px;font-weight:700;color:var(--accent);letter-spacing:1px;">✨ 今日由 AI 出題</div><div style="font-size:12px;color:var(--ink-soft);margin-top:4px;">每天都有新題目</div></div>`:'';
 }
 
 function buildGeminiPrompt(diffKey){
@@ -208,7 +226,7 @@ async function fetchGeminiQuestionsFromApi(diffKey){
     }
     if(!isValidQuestions(qs))return null;
     const out=qs.slice(0,3);
-    try{localStorage.setItem(getAiCacheKey(diffKey),JSON.stringify(out));}catch{}
+    try{localStorage.setItem(getAiCacheKey(diffKey),JSON.stringify(out));markAiGeneratedForDiff(diffKey);}catch{}
     return out;
   }catch{clearTimeout(t);return null;}
 }
@@ -253,6 +271,7 @@ async function init(){
   document.getElementById('todayDate').textContent=formatFull();
   _data=await loadData();
   _hist=await loadHist();
+  syncAiGeneratedFlag();
   render();
 }
 
@@ -311,8 +330,8 @@ function renderStep(){
     if(GEMINI_API_KEY){
       renderLoading(diff.label);
       const aiQs=await fetchGeminiQuestions(diffKey);
-      if(aiQs){_data.questions=aiQs;_data.aiGenerated=true;}
-      else _data.questions=pick3(diffKey);
+      if(aiQs){_data.questions=aiQs;_data.aiGenerated=true;markAiGeneratedForDiff(diffKey);}
+      else{_data.questions=pick3(diffKey);_data.aiGenerated=false;}
     }else{
       _data.questions=pick3(diffKey);
     }
@@ -344,7 +363,7 @@ function renderQ(){
       </div>
       <div style="font-size:13px;color:var(--accent);text-align:right;margin-top:2px;">${diff.label}</div>
     </div>
-    ${_data.aiGenerated?`<div style="background:linear-gradient(135deg,rgba(200,67,26,.1) 0%,rgba(184,138,62,.08) 100%);border:1px solid var(--accent-soft);border-radius:14px;padding:14px 18px;margin-bottom:14px;text-align:center;"><div style="font-size:14px;font-weight:700;color:var(--accent);letter-spacing:1px;">✨ 今日由 AI 出題</div><div style="font-size:12px;color:var(--ink-soft);margin-top:4px;">每天都有新題目</div></div>`:''}
+    ${aiBannerHtml()}
     ${qH}
     ${allDone?`<button class="btn-main" id="finishBtn" style="background:var(--accent);">完成！查看今日成果</button>`:''}`;
   document.querySelectorAll('.q-opt:not([disabled])').forEach(b=>{
@@ -397,6 +416,7 @@ function renderComplete(){
       <div class="sstreak">🔥 連續達標 ${_hist.streak} 天｜累積 ${_hist.total} 分</div>
       <div class="sdots">${dots}</div>
     </div>
+    ${aiBannerHtml()}
     <div style="display:flex;gap:10px;margin-bottom:14px;">
       <button class="btn-share" id="copyBtn" style="flex:1;margin:0;">📋 複製分享文字</button>
       <button class="btn-retry" id="retryBtn" style="flex:1;">重新挑戰</button>
