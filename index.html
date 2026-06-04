@@ -163,7 +163,16 @@ const GEMINI_API_KEY='';  // 填入你的 Google AI Studio API Key
 const _aiFetchPromises={};
 let _loadingMsgTimer=null;
 
-function getAiCacheKey(diffKey){return`${APP_NAMESPACE}:ai-cache:${TODAY}:${diffKey}`;}
+function getAiCacheKey(diffKey){return`${APP_NAMESPACE}:ai-cache:${TODAY}:${diffKey}:v${getAiRetryVersion()}`;}
+
+function getAiRetryVersion(){
+  try{const v=localStorage.getItem(`${APP_NAMESPACE}:ai-retry:${TODAY}`);return v?parseInt(v,10)||0:0;}catch{return 0;}
+}
+
+function bumpAiRetryVersion(){
+  try{localStorage.setItem(`${APP_NAMESPACE}:ai-retry:${TODAY}`,String(getAiRetryVersion()+1));}catch{}
+  Object.keys(_aiFetchPromises).forEach(k=>delete _aiFetchPromises[k]);
+}
 
 function readAiCache(diffKey){
   try{const c=localStorage.getItem(getAiCacheKey(diffKey));if(c){const p=JSON.parse(c);if(Array.isArray(p)&&p.length===3)return p;}}catch{}
@@ -415,7 +424,8 @@ function renderComplete(){
   document.getElementById('retryBtn').addEventListener('click',async()=>{
     if(!confirm('重新挑戰？今日得分將扣除。'))return;
     _hist.total-=sc;_hist.log=_hist.log.filter(d=>d.date!==TODAY);
-    _data={steps:null,questions:null,answers:[],completed:false};
+    bumpAiRetryVersion();
+    _data={steps:null,questions:null,answers:[],completed:false,aiGenerated:false};
     await saveData();await saveHist();render();
   });
 }
