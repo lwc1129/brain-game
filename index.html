@@ -166,7 +166,7 @@ async function fetchGeminiQuestions(diffKey){
   const ctrl=new AbortController();
   const t=setTimeout(()=>ctrl.abort(),10000);
   try{
-    const res=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,{
+    const res=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,{
       method:'POST',headers:{'Content-Type':'application/json'},signal:ctrl.signal,
       body:JSON.stringify({contents:[{parts:[{text:buildGeminiPrompt(diffKey)}]}],generationConfig:{temperature:0.8,maxOutputTokens:1024}})
     });
