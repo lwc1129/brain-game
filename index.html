@@ -76,6 +76,12 @@
   .hr-score{font-family:'Fraunces',serif;font-size:18px;color:var(--accent);font-weight:700;}
   .fnote{text-align:center;margin-top:20px;font-size:11px;color:var(--ink-soft);line-height:1.8;}
   .btn-main:disabled{opacity:.65;cursor:not-allowed;background:var(--ink-soft);}
+  .loading-card{text-align:center;padding:36px 22px;}
+  .loading-spinner{width:44px;height:44px;border:3px solid var(--line);border-top-color:var(--accent);border-radius:50%;margin:0 auto 18px;animation:spin .9s linear infinite;}
+  .loading-title{font-size:18px;font-weight:700;color:var(--accent);margin-bottom:8px;}
+  .loading-sub{font-size:14px;color:var(--ink-soft);line-height:1.6;min-height:44px;}
+  .loading-hint{font-size:12px;color:var(--gold);margin-top:14px;}
+  @keyframes spin{to{transform:rotate(360deg);}}
 </style>
 </head>
 <body>
@@ -154,33 +160,83 @@ async function saveHist(){try{localStorage.setItem(`${APP_NAMESPACE}:history`,JS
 
 // ── Gemini AI ──────────────────────────────────────────────────────────────
 const GEMINI_API_KEY='';  // 填入你的 Google AI Studio API Key
+const _aiFetchPromises={};
+let _loadingMsgTimer=null;
+
+function getAiCacheKey(diffKey){return`${APP_NAMESPACE}:ai-cache:${TODAY}:${diffKey}`;}
+
+function readAiCache(diffKey){
+  try{const c=localStorage.getItem(getAiCacheKey(diffKey));if(c){const p=JSON.parse(c);if(Array.isArray(p)&&p.length===3)return p;}}catch{}
+  return null;
+}
 
 function buildGeminiPrompt(diffKey){
   const desc={hard:'困難（需要思考的挑戰性題目，考驗邏輯與計算能力）',medium:'中等（需要一點思考，適合一般成人）',easy:'簡單（輕鬆的題目，適合日常練習）',super_easy:'超簡單（適合老年人的非常簡單題目，不要有複雜運算）'};
   return`你是一位認知訓練出題專家，請為台灣的銀髮族長輩出${desc[diffKey]}的繁體中文腦力訓練題目。\n\n請出3題，題型只能從以下選擇：邏輯、計算、數列、推理、語言、記憶、常識。\n\n每題格式為JSON物件：\n{"type":"題型","q":"題目文字","a":"正確答案","opts":["選項1","選項2","選項3","選項4"]}\n正確答案必須包含在opts陣列中，選項順序隨機。\n\n只回傳JSON陣列，不要其他文字或markdown：\n[{...},{...},{...}]`;
 }
 
-async function fetchGeminiQuestions(diffKey){
-  const cacheKey=`${APP_NAMESPACE}:ai-cache:${TODAY}`;
-  try{const c=localStorage.getItem(cacheKey);if(c){const p=JSON.parse(c);if(Array.isArray(p)&&p.length===3)return p;}}catch{}
+function isValidQuestions(qs){
+  return Array.isArray(qs)&&qs.length>=3&&qs.every(q=>typeof q.type==='string'&&typeof q.q==='string'&&typeof q.a==='string'&&Array.isArray(q.opts)&&q.opts.length===4&&q.opts.includes(q.a));
+}
+
+async function fetchGeminiQuestionsFromApi(diffKey){
   const ctrl=new AbortController();
-  const t=setTimeout(()=>ctrl.abort(),10000);
+  const t=setTimeout(()=>ctrl.abort(),8000);
   try{
     const res=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,{
       method:'POST',headers:{'Content-Type':'application/json'},signal:ctrl.signal,
-      body:JSON.stringify({contents:[{parts:[{text:buildGeminiPrompt(diffKey)}]}],generationConfig:{temperature:0.8,maxOutputTokens:1024}})
+      body:JSON.stringify({contents:[{parts:[{text:buildGeminiPrompt(diffKey)}]}],generationConfig:{temperature:0.7,maxOutputTokens:512,responseMimeType:'application/json'}})
     });
     clearTimeout(t);
     if(!res.ok)return null;
     const data=await res.json();
     const raw=data?.candidates?.[0]?.content?.parts?.[0]?.text??'';
-    const m=raw.match(/\[[\s\S]*\]/);
-    if(!m)return null;
-    const qs=JSON.parse(m[0]);
-    if(!Array.isArray(qs)||qs.length<3||!qs.every(q=>typeof q.type==='string'&&typeof q.q==='string'&&typeof q.a==='string'&&Array.isArray(q.opts)&&q.opts.length===4&&q.opts.includes(q.a)))return null;
-    try{localStorage.setItem(cacheKey,JSON.stringify(qs.slice(0,3)));}catch{}
-    return qs.slice(0,3);
+    let qs;
+    try{qs=JSON.parse(raw);}catch{
+      const m=raw.match(/\[[\s\S]*\]/);
+      if(!m)return null;
+      qs=JSON.parse(m[0]);
+    }
+    if(!isValidQuestions(qs))return null;
+    const out=qs.slice(0,3);
+    try{localStorage.setItem(getAiCacheKey(diffKey),JSON.stringify(out));}catch{}
+    return out;
   }catch{clearTimeout(t);return null;}
+}
+
+async function fetchGeminiQuestions(diffKey){
+  const cached=readAiCache(diffKey);
+  if(cached)return cached;
+  if(_aiFetchPromises[diffKey])return _aiFetchPromises[diffKey];
+  _aiFetchPromises[diffKey]=fetchGeminiQuestionsFromApi(diffKey).finally(()=>{delete _aiFetchPromises[diffKey];});
+  return _aiFetchPromises[diffKey];
+}
+
+function prefetchGeminiQuestions(diffKey){
+  if(!GEMINI_API_KEY||readAiCache(diffKey))return;
+  fetchGeminiQuestions(diffKey);
+}
+
+function clearLoadingMsgTimer(){
+  if(_loadingMsgTimer){clearInterval(_loadingMsgTimer);_loadingMsgTimer=null;}
+}
+
+function renderLoading(diffLabel){
+  clearLoadingMsgTimer();
+  const m=document.getElementById('mainArea');
+  const msgs=['🤖 AI 正在出題…','💭 思考中，請稍候…','✨ 快好了…'];
+  let i=0;
+  m.innerHTML=`<div class="card loading-card">
+    <div class="loading-spinner"></div>
+    <div class="loading-title">準備今日挑戰</div>
+    <div class="loading-sub" id="loadingMsg">${msgs[0]}</div>
+    <div class="loading-hint">難度：${diffLabel}</div>
+  </div>`;
+  _loadingMsgTimer=setInterval(()=>{
+    i=(i+1)%msgs.length;
+    const el=document.getElementById('loadingMsg');
+    if(el)el.textContent=msgs[i];
+  },1500);
 }
 // ───────────────────────────────────────────────────────────────────────────
 
@@ -192,6 +248,7 @@ async function init(){
 }
 
 function render(){
+  clearLoadingMsgTimer();
   if(_data.completed){renderComplete();return;}
   if(_data.steps==null){renderStep();return;}
   renderQ();
@@ -228,20 +285,22 @@ function renderStep(){
     ${logH}
     <div class="fnote">&lt;2000步 困難｜2000-4000 中等｜4000-6000 簡單｜&gt;6000 超簡單<br>每答對一題 +10 分，全對額外 +5 分<br>步數達3000以上計入連續達標天數</div>`;
 
+  let _prefetchTimer=null;
   document.getElementById('si').addEventListener('input',function(){
     const v=parseInt(this.value);const db=document.getElementById('db');
-    if(!isNaN(v)&&v>=0){const d=getDiff(v);db.innerHTML=`難度：<strong>${d.label}</strong>　${d.msg}`;db.style.display='flex';}
-    else db.style.display='none';
+    if(!isNaN(v)&&v>=0){const d=getDiff(v);db.innerHTML=`難度：<strong>${d.label}</strong>　${d.msg}`;db.style.display='flex';
+      if(GEMINI_API_KEY){clearTimeout(_prefetchTimer);_prefetchTimer=setTimeout(()=>prefetchGeminiQuestions(d.key),400);}
+    }else db.style.display='none';
   });
   document.getElementById('startBtn').addEventListener('click',async()=>{
     if(_data.completed){render();return;}
     const v=parseInt(document.getElementById('si').value);
     if(isNaN(v)||v<0){alert('請輸入有效步數');return;}
-    const diffKey=getDiff(v).key;
+    const diff=getDiff(v);
+    const diffKey=diff.key;
     _data.steps=v;_data.answers=[];_data.aiGenerated=false;
     if(GEMINI_API_KEY){
-      const btn=document.getElementById('startBtn');
-      btn.disabled=true;btn.textContent='🤖 出題中…';
+      renderLoading(diff.label);
       const aiQs=await fetchGeminiQuestions(diffKey);
       if(aiQs){_data.questions=aiQs;_data.aiGenerated=true;}
       else _data.questions=pick3(diffKey);
