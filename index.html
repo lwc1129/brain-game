@@ -273,6 +273,7 @@ function renderQ(){
       </div>
       <div style="font-size:13px;color:var(--accent);text-align:right;margin-top:2px;">${diff.label}</div>
     </div>
+    ${_data.aiGenerated?`<div style="background:linear-gradient(135deg,rgba(200,67,26,.1) 0%,rgba(184,138,62,.08) 100%);border:1px solid var(--accent-soft);border-radius:14px;padding:14px 18px;margin-bottom:14px;text-align:center;"><div style="font-size:14px;font-weight:700;color:var(--accent);letter-spacing:1px;">✨ 今日由 AI 出題</div><div style="font-size:12px;color:var(--ink-soft);margin-top:4px;">每天都有新題目</div></div>`:''}
     ${qH}
     ${allDone?`<button class="btn-main" id="finishBtn" style="background:var(--accent);">完成！查看今日成果</button>`:''}`;
   document.querySelectorAll('.q-opt:not([disabled])').forEach(b=>{
