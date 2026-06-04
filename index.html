@@ -75,6 +75,7 @@
   .hr-info{color:var(--ink);font-weight:600;}
   .hr-score{font-family:'Fraunces',serif;font-size:18px;color:var(--accent);font-weight:700;}
   .fnote{text-align:center;margin-top:20px;font-size:11px;color:var(--ink-soft);line-height:1.8;}
+  .btn-main:disabled{opacity:.65;cursor:not-allowed;background:var(--ink-soft);}
 </style>
 </head>
 <body>
@@ -146,10 +147,39 @@ const TODAY=getToday();
 const APP_NAMESPACE='brain-game';
 let _data=null,_hist=null;
 
-async function loadData(){const def={steps:null,questions:null,answers:[],completed:false};try{const r=localStorage.getItem(`${APP_NAMESPACE}:today:${TODAY}`);return r?JSON.parse(r):def;}catch{return def;}}
+async function loadData(){const def={steps:null,questions:null,answers:[],completed:false,aiGenerated:false};try{const r=localStorage.getItem(`${APP_NAMESPACE}:today:${TODAY}`);return r?JSON.parse(r):def;}catch{return def;}}
 async function saveData(){try{localStorage.setItem(`${APP_NAMESPACE}:today:${TODAY}`,JSON.stringify(_data));}catch{}}
 async function loadHist(){try{const r=localStorage.getItem(`${APP_NAMESPACE}:history`);return r?JSON.parse(r):{total:0,streak:0,lastDate:null,log:[]};}catch{return{total:0,streak:0,lastDate:null,log:[]};}}
 async function saveHist(){try{localStorage.setItem(`${APP_NAMESPACE}:history`,JSON.stringify(_hist));}catch{}}
+
+// ── Gemini AI ──────────────────────────────────────────────────────────────
+const GEMINI_API_KEY='';  // 填入你的 Google AI Studio API Key
+
+function buildGeminiPrompt(diffKey){
+  const desc={hard:'困難（需要思考的挑戰性題目，考驗邏輯與計算能力）',medium:'中等（需要一點思考，適合一般成人）',easy:'簡單（輕鬆的題目，適合日常練習）',super_easy:'超簡單（適合老年人的非常簡單題目，不要有複雜運算）'};
+  return`你是一位認知訓練出題專家，請為台灣的銀髮族長輩出${desc[diffKey]}的繁體中文腦力訓練題目。\n\n請出3題，題型只能從以下選擇：邏輯、計算、數列、推理、語言、記憶、常識。\n\n每題格式為JSON物件：\n{"type":"題型","q":"題目文字","a":"正確答案","opts":["選項1","選項2","選項3","選項4"]}\n正確答案必須包含在opts陣列中，選項順序隨機。\n\n只回傳JSON陣列，不要其他文字或markdown：\n[{...},{...},{...}]`;
+}
+
+async function fetchGeminiQuestions(diffKey){
+  const ctrl=new AbortController();
+  const t=setTimeout(()=>ctrl.abort(),10000);
+  try{
+    const res=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,{
+      method:'POST',headers:{'Content-Type':'application/json'},signal:ctrl.signal,
+      body:JSON.stringify({contents:[{parts:[{text:buildGeminiPrompt(diffKey)}]}],generationConfig:{temperature:0.8,maxOutputTokens:1024}})
+    });
+    clearTimeout(t);
+    if(!res.ok)return null;
+    const data=await res.json();
+    const raw=data?.candidates?.[0]?.content?.parts?.[0]?.text??'';
+    const m=raw.match(/\[[\s\S]*\]/);
+    if(!m)return null;
+    const qs=JSON.parse(m[0]);
+    if(!Array.isArray(qs)||qs.length<3||!qs.every(q=>typeof q.type==='string'&&typeof q.q==='string'&&typeof q.a==='string'&&Array.isArray(q.opts)&&q.opts.length===4&&q.opts.includes(q.a)))return null;
+    return qs.slice(0,3);
+  }catch{clearTimeout(t);return null;}
+}
+// ───────────────────────────────────────────────────────────────────────────
 
 async function init(){
   document.getElementById('todayDate').textContent=formatFull();
@@ -204,7 +234,17 @@ function renderStep(){
     if(_data.completed){render();return;}
     const v=parseInt(document.getElementById('si').value);
     if(isNaN(v)||v<0){alert('請輸入有效步數');return;}
-    _data.steps=v;_data.questions=pick3(getDiff(v).key);_data.answers=[];
+    const diffKey=getDiff(v).key;
+    _data.steps=v;_data.answers=[];_data.aiGenerated=false;
+    if(GEMINI_API_KEY){
+      const btn=document.getElementById('startBtn');
+      btn.disabled=true;btn.textContent='🤖 出題中…';
+      const aiQs=await fetchGeminiQuestions(diffKey);
+      if(aiQs){_data.questions=aiQs;_data.aiGenerated=true;}
+      else _data.questions=pick3(diffKey);
+    }else{
+      _data.questions=pick3(diffKey);
+    }
     await saveData();render();
   });
 }
@@ -220,7 +260,7 @@ function renderQ(){
     }).join('');
     const res=answered?`<div class="q-result show ${ok?'ok':'fail'}">${ok?'✓ 答對了！+10分':'✗ 正確答案是「'+q.a+'」'}</div>`:'';
     return`<div class="question-card ${answered?'done':''}">
-      <div class="q-header"><div class="q-num">第 ${i+1} 題 / 3</div><div class="q-tag">${q.type}｜${diff.label}</div></div>
+      <div class="q-header"><div class="q-num">第 ${i+1} 題 / 3</div><div class="q-tag">${_data.aiGenerated?'AI':q.type}｜${diff.label}</div></div>
       <div class="q-text">${q.q}</div>
       <div class="q-options">${opts}</div>${res}</div>`;
   }).join('');
