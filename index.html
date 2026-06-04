@@ -35,7 +35,16 @@
   .question-card.done{opacity:.55;background:var(--bg);}
   .q-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;padding-bottom:10px;border-bottom:1px dashed var(--line);}
   .q-num{font-family:'Fraunces',serif;font-size:13px;color:var(--gold);letter-spacing:2px;font-weight:700;}
-  .q-tag{font-size:11px;padding:3px 10px;border-radius:10px;background:rgba(184,138,62,.15);color:var(--gold);letter-spacing:1px;font-weight:600;}
+  .q-tag{font-size:11px;padding:3px 10px;border-radius:10px;letter-spacing:1px;font-weight:600;}
+  .q-tag-ai{background:rgba(200,67,26,.15);color:var(--accent);}
+  .q-tag-bank{background:rgba(107,93,79,.12);color:var(--ink-soft);}
+  .source-banner{border-radius:14px;padding:14px 18px;margin-bottom:14px;text-align:center;}
+  .source-banner-ai{background:linear-gradient(135deg,rgba(200,67,26,.1) 0%,rgba(184,138,62,.08) 100%);border:1px solid var(--accent-soft);}
+  .source-banner-bank{background:var(--bg);border:1px solid var(--line);}
+  .source-banner-title{font-size:14px;font-weight:700;letter-spacing:1px;}
+  .source-banner-ai .source-banner-title{color:var(--accent);}
+  .source-banner-bank .source-banner-title{color:var(--ink-soft);}
+  .source-banner-sub{font-size:12px;color:var(--ink-soft);margin-top:4px;}
   .q-text{font-size:20px;line-height:1.65;margin-bottom:18px;font-weight:500;}
   .q-options{display:flex;flex-direction:column;gap:9px;}
   .q-opt{background:var(--bg);border:2px solid var(--line);border-radius:11px;padding:14px 16px;font-size:17px;cursor:pointer;transition:all .15s;color:var(--ink);font-family:'Noto Serif TC',serif;text-align:left;font-weight:500;}
@@ -193,8 +202,15 @@ function syncAiGeneratedFlag(){
   if(isAiGeneratedForDiff(diffKey))_data.aiGenerated=true;
 }
 
-function aiBannerHtml(){
-  return _data.aiGenerated?`<div style="background:linear-gradient(135deg,rgba(200,67,26,.1) 0%,rgba(184,138,62,.08) 100%);border:1px solid var(--accent-soft);border-radius:14px;padding:14px 18px;margin-bottom:14px;text-align:center;"><div style="font-size:14px;font-weight:700;color:var(--accent);letter-spacing:1px;">✨ 今日由 AI 出題</div><div style="font-size:12px;color:var(--ink-soft);margin-top:4px;">每天都有新題目</div></div>`:'';
+function qSourceTagClass(){return _data.aiGenerated?'q-tag q-tag-ai':'q-tag q-tag-bank';}
+
+function qSourceLabel(){return _data.aiGenerated?'🤖 AI 出題':'📚 題庫出題';}
+
+function sourceBannerHtml(){
+  if(_data.aiGenerated){
+    return`<div class="source-banner source-banner-ai"><div class="source-banner-title">✨ 今日由 AI 出題</div><div class="source-banner-sub">由 Gemini 即時生成，每天都不一樣</div></div>`;
+  }
+  return`<div class="source-banner source-banner-bank"><div class="source-banner-title">📚 今日由題庫出題</div><div class="source-banner-sub">AI 暫時無法使用，已改用內建題庫</div></div>`;
 }
 
 function buildGeminiPrompt(diffKey){
@@ -350,7 +366,7 @@ function renderQ(){
     }).join('');
     const res=answered?`<div class="q-result show ${ok?'ok':'fail'}">${ok?'✓ 答對了！+10分':'✗ 正確答案是「'+q.a+'」'}</div>`:'';
     return`<div class="question-card ${answered?'done':''}">
-      <div class="q-header"><div class="q-num">第 ${i+1} 題 / 3</div><div class="q-tag">${_data.aiGenerated?'AI':'題庫'}｜${diff.label}</div></div>
+      <div class="q-header"><div class="q-num">第 ${i+1} 題 / 3</div><div class="${qSourceTagClass()}">${qSourceLabel()}｜${diff.label}</div></div>
       <div class="q-text">${q.q}</div>
       <div class="q-options">${opts}</div>${res}</div>`;
   }).join('');
@@ -363,7 +379,7 @@ function renderQ(){
       </div>
       <div style="font-size:13px;color:var(--accent);text-align:right;margin-top:2px;">${diff.label}</div>
     </div>
-    ${aiBannerHtml()}
+    ${sourceBannerHtml()}
     ${qH}
     ${allDone?`<button class="btn-main" id="finishBtn" style="background:var(--accent);">完成！查看今日成果</button>`:''}`;
   document.querySelectorAll('.q-opt:not([disabled])').forEach(b=>{
@@ -411,12 +427,12 @@ function renderComplete(){
         <div class="ss"><div class="ss-n">${c} / 3</div><div class="ss-l">答對題數</div></div>
         <div class="ss"><div class="ss-n">+${sc}</div><div class="ss-l">今日得分</div></div>
       </div>
-      <div class="sdiff">${diff.label}</div>
+      <div class="sdiff">${diff.label}　·　${qSourceLabel()}</div>
       <div class="smsg">${shareMsg(c)}</div>
       <div class="sstreak">🔥 連續達標 ${_hist.streak} 天｜累積 ${_hist.total} 分</div>
       <div class="sdots">${dots}</div>
     </div>
-    ${aiBannerHtml()}
+    ${sourceBannerHtml()}
     <div style="display:flex;gap:10px;margin-bottom:14px;">
       <button class="btn-share" id="copyBtn" style="flex:1;margin:0;">📋 複製分享文字</button>
       <button class="btn-retry" id="retryBtn" style="flex:1;">重新挑戰</button>
