@@ -32,6 +32,12 @@ jobs:
         run: |
           sed -i "s|const GEMINI_API_KEY='';  // 填入你的 Google AI Studio API Key|const GEMINI_API_KEY='${GEMINI_API_KEY}';|g" index.html
 
+      - name: Inject GA Measurement ID
+        env:
+          GA_MEASUREMENT_ID: ${{ secrets.GA_MEASUREMENT_ID }}
+        run: |
+          sed -i "s|const GA_MEASUREMENT_ID='';  // GA4 Measurement ID|const GA_MEASUREMENT_ID='${GA_MEASUREMENT_ID}';|g" index.html
+
       - uses: actions/configure-pages@v5
 
       - uses: actions/upload-pages-artifact@v3
