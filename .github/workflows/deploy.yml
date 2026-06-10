@@ -26,17 +26,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Inject Gemini API Key
-        env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-        run: |
-          sed -i "s|const GEMINI_API_KEY='';  // 填入你的 Google AI Studio API Key|const GEMINI_API_KEY='${GEMINI_API_KEY}';|g" index.html
-
-      - name: Inject GA Measurement ID
+      # 注意：絕不把 GEMINI_API_KEY 注入前端。AI 出題一律經由後端 proxy
+      # （見 proxy/），這裡只注入 proxy 網址與 GA ID 這類可公開的設定。
+      - name: Inject runtime config
         env:
           GA_MEASUREMENT_ID: ${{ secrets.GA_MEASUREMENT_ID }}
+          AI_PROXY_URL: ${{ vars.AI_PROXY_URL }}
         run: |
-          sed -i "s|const GA_MEASUREMENT_ID='';  // GA4 Measurement ID|const GA_MEASUREMENT_ID='${GA_MEASUREMENT_ID}';|g" index.html
+          sed -i "s|GA_MEASUREMENT_ID: ''|GA_MEASUREMENT_ID: '${GA_MEASUREMENT_ID}'|" js/config.js
+          sed -i "s|AI_PROXY_URL: ''|AI_PROXY_URL: '${AI_PROXY_URL}'|" js/config.js
 
       - uses: actions/configure-pages@v5
 

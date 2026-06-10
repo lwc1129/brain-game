@@ -1,0 +1,50 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  python-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run question generator tests
+        run: python -m unittest test_generate_questions -v
+
+  js-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Run frontend logic tests
+        run: node --test tests/*.test.mjs
+
+      - name: Validate questions.json against frontend schema
+        run: |
+          node --input-type=module -e "
+            import { readFile } from 'node:fs/promises';
+            import { isValidQuestionBank } from './js/logic.js';
+            const data = JSON.parse(await readFile('questions.json', 'utf8'));
+            if (!isValidQuestionBank(data)) {
+              console.error('questions.json 未通過前端題庫驗證');
+              process.exit(1);
+            }
+            console.log('questions.json 驗證通過');
+          "

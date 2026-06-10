@@ -1,0 +1,10 @@
+name = "brain-game-ai-proxy"
+main = "worker.js"
+compatibility_date = "2026-01-01"
+
+[vars]
+# 允許呼叫 proxy 的前端來源（逗號分隔）。請改成你的 GitHub Pages 網址。
+ALLOWED_ORIGINS = "https://lwc1129.github.io"
+
+# GEMINI_API_KEY 是 secret，不放在這裡：
+#   wrangler secret put GEMINI_API_KEY

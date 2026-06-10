@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
-"""使用 Gemini API 自動產生 brain-game 的每週題庫。
+"""使用 Gemini API 自動擴充 brain-game 的每週題庫。
 
 由 GitHub Actions 每週排程觸發。流程：
 1. 從環境變數讀取 GEMINI_API_KEY（不 hardcode）。
-2. 呼叫 Gemini API，要求回傳嚴格 JSON 格式的題庫。
+2. 呼叫 Gemini API，要求回傳嚴格 JSON 格式的新題目。
 3. 解析並驗證回傳內容是否符合 QB schema。
-4. 驗證通過才寫入 questions.json；任何失敗以非零 exit code 中止。
+4. 與既有 questions.json「合併」：以題目文字去重、新題附加在後、
+   每難度題數達上限時淘汰最舊的題目。題庫因此每週成長而非被覆蓋，
+   搭配前端的近期出題排除機制，降低熟客遇到重複題目的頻率。
+5. 驗證通過才寫入 questions.json；任何失敗以非零 exit code 中止。
 
 QB schema（與 index.html 內現有 QB 物件完全一致）：
 {
@@ -24,9 +27,12 @@ import sys
 # QB schema 的四個難度層級，順序與 index.html 一致。
 DIFFICULTIES = ["hard", "medium", "easy", "super_easy"]
 
-# 每個難度的最低題目數。對齊 index.html 的 pick3()：每次抽 3 題，
-# 故每個難度至少需 3 題才能保證遊戲正常運作。
+# 每個難度的最低題目數。對齊前端 js/logic.js 的 pickQuestions()：
+# 每次抽 3 題，故每個難度至少需 3 題才能保證遊戲正常運作。
 MIN_PER_DIFFICULTY = 3
+
+# 合併後每個難度的題數上限，超過時淘汰最舊的題目。
+MAX_PER_DIFFICULTY = 200
 
 # 每題必要欄位。
 REQUIRED_QUESTION_FIELDS = ["type", "q", "a", "opts"]
@@ -156,6 +162,55 @@ def validate_questions(data):
     return True
 
 
+def normalize_question_text(text):
+    """去除空白後的題目文字，作為去重 key。"""
+    return "".join(str(text).split())
+
+
+def load_existing_bank(path):
+    """讀取既有題庫。檔案不存在、無法解析或結構不符時回傳空題庫。
+
+    既有題庫損壞不應讓整次更新失敗（新題庫仍會經過完整驗證），
+    因此這裡容錯處理、僅輸出警告。
+    """
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"警告：無法讀取既有題庫，視為空題庫：{exc}", file=sys.stderr)
+        return {}
+    if not isinstance(data, dict):
+        print("警告：既有題庫結構不符，視為空題庫", file=sys.stderr)
+        return {}
+    return data
+
+
+def merge_question_banks(existing, new):
+    """合併既有題庫與新題庫。
+
+    規則：
+    - 以去除空白後的題目文字（q）去重，既有題目優先保留。
+    - 新題附加在既有題目之後。
+    - 每難度超過 MAX_PER_DIFFICULTY 時，淘汰最舊（最前面）的題目。
+    """
+    merged = {}
+    for diff in DIFFICULTIES:
+        old_qs = existing.get(diff) if isinstance(existing.get(diff), list) else []
+        new_qs = new.get(diff, [])
+        seen = set()
+        combined = []
+        for q in list(old_qs) + list(new_qs):
+            if not isinstance(q, dict):
+                continue
+            key = normalize_question_text(q.get("q", ""))
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            combined.append(q)
+        merged[diff] = combined[-MAX_PER_DIFFICULTY:]
+    return merged
+
+
 def call_gemini(api_key):
     """呼叫 Gemini API，回傳文字內容。
 
@@ -184,22 +239,25 @@ def main():
 
     try:
         raw_text = call_gemini(api_key)
-        data = parse_response_text(raw_text)
-        validate_questions(data)
+        new_data = parse_response_text(raw_text)
+        validate_questions(new_data)
+        merged = merge_question_banks(load_existing_bank(OUTPUT_PATH), new_data)
+        validate_questions(merged)
     except Exception as exc:  # noqa: BLE001 - 任何失敗都需明確中止
         print(f"題庫產生失敗，不更新 questions.json：{exc}", file=sys.stderr)
         sys.exit(1)
 
     try:
         with open(OUTPUT_PATH, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+            json.dump(merged, f, ensure_ascii=False, indent=2)
             f.write("\n")
     except OSError as exc:
         print(f"寫入 questions.json 失敗：{exc}", file=sys.stderr)
         sys.exit(1)
 
-    total = sum(len(data[d]) for d in DIFFICULTIES)
-    print(f"已成功更新 questions.json，共 {total} 題。")
+    new_total = sum(len(new_data[d]) for d in DIFFICULTIES)
+    total = sum(len(merged[d]) for d in DIFFICULTIES)
+    print(f"已成功更新 questions.json：本次新增候選 {new_total} 題，合併後共 {total} 題。")
 
 
 if __name__ == "__main__":
