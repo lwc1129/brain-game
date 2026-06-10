@@ -122,7 +122,9 @@ function trackEvent(name,params){
   try{window.gtag('event',name,params);}catch{}
 }
 
-const QB={
+// QB_FALLBACK：內建題庫，永不被自動化流程覆蓋。當 questions.json 無法載入
+// 或結構/數量不符時，靜默 fallback 回此內建題庫，確保遊戲必定可啟動。
+const QB_FALLBACK={
   hard:[
     {type:'邏輯',q:'小明比小華大3歲，小華比小芳小5歲。若小芳今年20歲，小明幾歲？',a:'18歲',opts:['18歲','15歲','22歲','20歲']},
     {type:'計算',q:'一條繩子對折三次後長12公分，原本長幾公分？',a:'96',opts:['96','36','48','72']},
@@ -252,6 +254,39 @@ const QB={
     {type:'計算',q:'3 + 7 = ？',a:'10',opts:['10','9','11','8']},
   ],
 };
+
+// QB：實際使用的題庫參照，預設指向內建 fallback；
+// 若 questions.json 成功載入並通過驗證，則改指向動態題庫。
+let QB=QB_FALLBACK;
+
+// 每個難度的最低題目數，與 pick3() 每次抽 3 題的邏輯對齊。
+const MIN_PER_DIFFICULTY=3;
+const DIFFICULTIES=['hard','medium','easy','super_easy'];
+
+// 驗證動態題庫結構：四個難度皆存在、皆為陣列、且各自題目數 >= 最低需求。
+function isValidQuestionBank(data){
+  if(!data||typeof data!=='object'||Array.isArray(data))return false;
+  return DIFFICULTIES.every(d=>Array.isArray(data[d])&&data[d].length>=MIN_PER_DIFFICULTY);
+}
+
+// 從 GitHub Pages 取得 questions.json。任何失敗（HTTP error / network error /
+// 結構不符 / 題目數不足）皆靜默 fallback 至 QB_FALLBACK，並以 console.warn 說明原因。
+async function fetchQuestions(){
+  try{
+    const r=await fetch('./questions.json',{cache:'no-store'});
+    if(!r.ok)throw new Error(`HTTP ${r.status}`);
+    const data=await r.json();
+    if(!isValidQuestionBank(data)){
+      console.warn('題目數不足或結構不符，使用內建題庫');
+      QB=QB_FALLBACK;
+      return;
+    }
+    QB=data;
+  }catch(e){
+    console.warn('questions.json 載入失敗，使用內建題庫：',e.message||e);
+    QB=QB_FALLBACK;
+  }
+}
 
 function getToday(){const d=new Date();return`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;}
 function formatFull(){const d=new Date();const w=['日','一','二','三','四','五','六'];return`${d.getFullYear()} 年 ${d.getMonth()+1} 月 ${d.getDate()} 日　星期${w[d.getDay()]}`;}
@@ -570,7 +605,8 @@ function renderComplete(){
   });
 }
 
-init();
+// 先載入動態題庫（成功則覆蓋 QB，失敗則沿用 QB_FALLBACK），完成後再啟動遊戲主流程。
+fetchQuestions().then(init);
 </script>
 </body>
 </html>
