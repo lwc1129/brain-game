@@ -20,11 +20,16 @@ jobs:
       - name: Get PR diff
         id: diff
         run: |
-          git diff origin/main...HEAD -- . \
+          DIFF=$(git diff origin/main...HEAD -- . \
             ':(exclude).github/' \
             ':(exclude)*.json' \
-            | head -n 150 > /tmp/pr_diff.txt
-          echo "diff_ready=true" >> $GITHUB_OUTPUT
+            | head -n 150)
+          if [ -z "$DIFF" ]; then
+            DIFF="此 PR 無程式碼變更，請回覆：✅ 無需審查。"
+          fi
+          echo "content<<EOF" >> $GITHUB_OUTPUT
+          echo "$DIFF" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Claude review
         env:
@@ -33,7 +38,7 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
         run: |
-          DIFF=$(cat /tmp/pr_diff.txt)
+          DIFF="${{ steps.diff.outputs.content }}"
           FULL_LINE_COUNT=$(git diff origin/main...HEAD -- . \
             ':(exclude).github/' \
             ':(exclude)*.json' | wc -l)
@@ -73,11 +78,16 @@ jobs:
       - name: Get PR diff
         id: diff
         run: |
-          git diff origin/main...HEAD -- . \
+          DIFF=$(git diff origin/main...HEAD -- . \
             ':(exclude).github/' \
             ':(exclude)*.json' \
-            | head -n 150 > /tmp/pr_diff.txt
-          echo "diff_ready=true" >> $GITHUB_OUTPUT
+            | head -n 150)
+          if [ -z "$DIFF" ]; then
+            DIFF="此 PR 無程式碼變更，請回覆：✅ 無需審查。"
+          fi
+          echo "content<<EOF" >> $GITHUB_OUTPUT
+          echo "$DIFF" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Gemini review
         env:
@@ -86,7 +96,7 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
         run: |
-          DIFF=$(cat /tmp/pr_diff.txt)
+          DIFF="${{ steps.diff.outputs.content }}"
           FULL_LINE_COUNT=$(git diff origin/main...HEAD -- . \
             ':(exclude).github/' \
             ':(exclude)*.json' | wc -l)
