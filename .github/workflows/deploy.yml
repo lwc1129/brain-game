@@ -27,14 +27,19 @@ jobs:
       - uses: actions/checkout@v4
 
       # 注意：絕不把 GEMINI_API_KEY 注入前端。AI 出題一律經由後端 proxy
-      # （見 proxy/），這裡只注入 proxy 網址與 GA ID 這類可公開的設定。
+      # （見 api/questions.js），這裡只注入 proxy 網址與 GA ID 這類可公開的設定。
+      # 未設定時保留 js/config.js 內已提交的預設值。
       - name: Inject runtime config
         env:
           GA_MEASUREMENT_ID: ${{ secrets.GA_MEASUREMENT_ID }}
           AI_PROXY_URL: ${{ vars.AI_PROXY_URL }}
         run: |
-          sed -i "s|GA_MEASUREMENT_ID: ''|GA_MEASUREMENT_ID: '${GA_MEASUREMENT_ID}'|" js/config.js
-          sed -i "s|AI_PROXY_URL: ''|AI_PROXY_URL: '${AI_PROXY_URL}'|" js/config.js
+          if [ -n "${GA_MEASUREMENT_ID}" ]; then
+            sed -i "s|GA_MEASUREMENT_ID: '[^']*'|GA_MEASUREMENT_ID: '${GA_MEASUREMENT_ID}'|" js/config.js
+          fi
+          if [ -n "${AI_PROXY_URL}" ]; then
+            sed -i "s|AI_PROXY_URL: '[^']*'|AI_PROXY_URL: '${AI_PROXY_URL}'|" js/config.js
+          fi
 
       - uses: actions/configure-pages@v5
 

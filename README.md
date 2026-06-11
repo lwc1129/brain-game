@@ -17,7 +17,7 @@ js/
   analytics.js              GA4 事件
   app.js                    畫面渲染與事件繫結（進入點）
 tests/logic.test.mjs        前端邏輯單元測試（node --test）
-proxy/                      Cloudflare Worker：Gemini API 代理（金鑰保管處）
+api/questions.js            Vercel Serverless Function：Gemini API 代理（金鑰保管處）
 generate_questions.py       每週題庫擴充腳本（合併＋去重＋上限）
 test_generate_questions.py  題庫腳本單元測試
 questions.json              動態題庫（GitHub Actions 每週自動擴充）
@@ -25,13 +25,25 @@ questions.json              動態題庫（GitHub Actions 每週自動擴充）
 
 ## 安全性：Gemini API key 的處理
 
-- **前端與部署產物中沒有任何金鑰。** AI 出題經由 `proxy/`（Cloudflare Worker）代理，
-  金鑰以 Worker secret 保管，並以 `ALLOWED_ORIGINS` 限制來源。部署方式見
-  [proxy/README.md](proxy/README.md)。
-- 部署 workflow 只注入兩個可公開的設定值：repository variable `AI_PROXY_URL`
-  與 secret `GA_MEASUREMENT_ID`。
-- `AI_PROXY_URL` 未設定時，前端自動改用題庫出題，遊戲功能完整可用。
+- **前端與部署產物中沒有任何金鑰。** AI 出題經由 `api/questions.js`
+  （Vercel Serverless Function）代理，金鑰存在 Vercel 環境變數，
+  並以 `ALLOWED_ORIGINS` 限制來源（預設只允許本專案的 GitHub Pages）。
+- `js/config.js` 的 `AI_PROXY_URL` 是可公開的 proxy 網址；未設定時，
+  前端自動改用題庫出題，遊戲功能完整可用。GitHub repository variable
+  `AI_PROXY_URL` 可在部署時覆寫它。
 - 每週題庫更新（GitHub Actions）在伺服器端使用 `secrets.GEMINI_API_KEY`，不經前端。
+
+### AI proxy 設定（一次性）
+
+1. 到 [Google AI Studio](https://aistudio.google.com/apikey) 申請 API key
+   （舊 key 若曾被舊版部署流程寫進前端，請作廢重發）。
+2. 到 [vercel.com/new](https://vercel.com/new) 匯入本 repo，
+   Framework Preset 選「Other」，並在 Environment Variables 加上
+   `GEMINI_API_KEY`，按 Deploy。
+3. 把部署後的網域（例如 `https://brain-game-xxx.vercel.app`）加上
+   `/api/questions` 路徑，填入 `js/config.js` 的 `AI_PROXY_URL`。
+
+之後每次 push，Vercel 會自動重新部署 proxy；GitHub Pages 照常部署遊戲本體。
 
 ## 題庫
 

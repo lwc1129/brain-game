@@ -1,18 +1,16 @@
-/**
- * brain-game AI 出題 proxy（Cloudflare Worker）。
- *
- * 前端只送 { difficulty }，Gemini API key 以 Worker secret 保管，
- * 永遠不會出現在瀏覽器端。部署方式見 proxy/README.md。
- *
- * 環境設定：
- *  - GEMINI_API_KEY（secret）：Google AI Studio API key
- *  - ALLOWED_ORIGINS（var）：允許的來源，逗號分隔，
- *    例如 "https://lwc1129.github.io"
- */
+// brain-game AI 出題 proxy（Vercel Serverless Function）。
+//
+// 前端只送 { difficulty }，Gemini API key 以環境變數保管，
+// 永遠不會出現在瀏覽器端。
+//
+// Vercel 專案 Settings → Environment Variables：
+//  - GEMINI_API_KEY（必填）：Google AI Studio API key
+//  - ALLOWED_ORIGINS（選填）：允許的前端來源，逗號分隔；預設為 GitHub Pages 網址
 
 const DIFFICULTIES = new Set(['hard', 'medium', 'easy', 'super_easy']);
 const QUESTIONS_PER_DAY = 3;
 const MODEL_NAME = 'gemini-2.5-flash';
+const DEFAULT_ALLOWED_ORIGINS = 'https://lwc1129.github.io';
 
 const DIFF_DESC = {
   hard: '困難（需要思考的挑戰性題目，考驗邏輯與計算能力）',
@@ -48,24 +46,6 @@ function isValidQuestions(qs) {
         q.opts.includes(q.a)
     )
   );
-}
-
-function corsHeaders(request, env) {
-  const origin = request.headers.get('Origin') || '';
-  const allowed = (env.ALLOWED_ORIGINS || '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
-  return {
-    'Access-Control-Allow-Origin': allowed.includes(origin) ? origin : allowed[0] || '',
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
-    'Content-Type': 'application/json; charset=utf-8',
-  };
-}
-
-function jsonResponse(body, status, headers) {
-  return new Response(JSON.stringify(body), { status, headers });
 }
 
 async function callGemini(diffKey, apiKey) {
@@ -105,33 +85,24 @@ async function callGemini(diffKey, apiKey) {
   return isValidQuestions(qs) ? qs.slice(0, QUESTIONS_PER_DAY) : null;
 }
 
-export default {
-  async fetch(request, env) {
-    const headers = corsHeaders(request, env);
-    if (request.method === 'OPTIONS') {
-      return new Response(null, { status: 204, headers });
-    }
-    if (request.method !== 'POST') {
-      return jsonResponse({ error: 'method not allowed' }, 405, headers);
-    }
+export default async function handler(req, res) {
+  const origin = req.headers.origin || '';
+  const allowed = (process.env.ALLOWED_ORIGINS || DEFAULT_ALLOWED_ORIGINS)
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  res.setHeader('Access-Control-Allow-Origin', allowed.includes(origin) ? origin : allowed[0]);
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-    let difficulty;
-    try {
-      ({ difficulty } = await request.json());
-    } catch {
-      return jsonResponse({ error: 'invalid JSON body' }, 400, headers);
-    }
-    if (!DIFFICULTIES.has(difficulty)) {
-      return jsonResponse({ error: 'invalid difficulty' }, 400, headers);
-    }
-    if (!env.GEMINI_API_KEY) {
-      return jsonResponse({ error: 'proxy not configured' }, 503, headers);
-    }
+  if (req.method === 'OPTIONS') return res.status(204).end();
+  if (req.method !== 'POST') return res.status(405).json({ error: 'method not allowed' });
 
-    const questions = await callGemini(difficulty, env.GEMINI_API_KEY);
-    if (!questions) {
-      return jsonResponse({ error: 'generation failed' }, 502, headers);
-    }
-    return jsonResponse({ questions }, 200, headers);
-  },
-};
+  const difficulty = req.body?.difficulty;
+  if (!DIFFICULTIES.has(difficulty)) return res.status(400).json({ error: 'invalid difficulty' });
+  if (!process.env.GEMINI_API_KEY) return res.status(503).json({ error: 'proxy not configured' });
+
+  const questions = await callGemini(difficulty, process.env.GEMINI_API_KEY);
+  if (!questions) return res.status(502).json({ error: 'generation failed' });
+  return res.status(200).json({ questions });
+}
