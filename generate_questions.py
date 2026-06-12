@@ -168,20 +168,16 @@ def normalize_question_text(text):
 
 
 def load_existing_bank(path):
-    """讀取既有題庫。檔案不存在、無法解析或結構不符時回傳空題庫。
-
-    既有題庫損壞不應讓整次更新失敗（新題庫仍會經過完整驗證），
-    因此這裡容錯處理、僅輸出警告。
-    """
+    """讀取既有題庫。檔案不存在時回傳空題庫；讀取或解析失敗時中止以防覆寫資料。"""
+    if not os.path.exists(path):
+        return {}
     try:
         with open(path, encoding="utf-8") as f:
             data = json.load(f)
     except (OSError, json.JSONDecodeError) as exc:
-        print(f"警告：無法讀取既有題庫，視為空題庫：{exc}", file=sys.stderr)
-        return {}
+        raise ValueError(f"無法讀取既有題庫，為避免覆寫資料已中止：{exc}") from exc
     if not isinstance(data, dict):
-        print("警告：既有題庫結構不符，視為空題庫", file=sys.stderr)
-        return {}
+        raise ValueError("既有題庫結構不符，為避免覆寫資料已中止")
     return data
 
 

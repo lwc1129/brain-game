@@ -100,10 +100,14 @@ export default async function handler(req, res) {
   const allowedStr = (process.env.ALLOWED_ORIGINS || '').trim() || DEFAULT_ALLOWED_ORIGINS;
   const allowed = allowedStr.split(',').map((s) => s.trim()).filter(Boolean);
   if (allowed.length === 0) allowed.push(DEFAULT_ALLOWED_ORIGINS);
-  res.setHeader('Access-Control-Allow-Origin', allowed.includes(origin) ? origin : allowed[0]);
+  const isAllowedOrigin = origin && allowed.includes(origin);
+  if (isAllowedOrigin) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  }
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
+  if (!isAllowedOrigin) return res.status(403).json({ error: 'origin not allowed' });
   if (req.method === 'OPTIONS') return res.status(204).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'method not allowed' });
 

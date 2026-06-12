@@ -251,6 +251,15 @@ function renderStep() {
   });
 }
 
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
 function renderQ() {
   const diff = getDiff(_data.steps);
   const qH = _data.questions
@@ -258,22 +267,25 @@ function renderQ() {
       const ans = _data.answers[i];
       const answered = ans !== undefined;
       const ok = answered && ans === q.a;
+      const safeQ = escapeHtml(q.q);
+      const safeA = escapeHtml(q.a);
       const opts = q.opts
         .map((o) => {
+          const safeO = escapeHtml(o);
           let c = 'q-opt';
           if (answered) {
             if (o === q.a) c += ' correct';
             else if (o === ans) c += ' wrong';
           }
-          return `<button class="${c}" data-i="${i}" data-o="${o}" ${answered ? 'disabled' : ''}>${o}</button>`;
+          return `<button class="${c}" data-i="${i}" data-o="${safeO}" ${answered ? 'disabled' : ''}>${safeO}</button>`;
         })
         .join('');
       const res = answered
-        ? `<div class="q-result show ${ok ? 'ok' : 'fail'}" role="status">${ok ? '✓ 答對了！+10分' : '✗ 正確答案是「' + q.a + '」'}</div>`
+        ? `<div class="q-result show ${ok ? 'ok' : 'fail'}" role="status">${ok ? '✓ 答對了！+10分' : '✗ 正確答案是「' + safeA + '」'}</div>`
         : '';
       return `<section class="question-card ${answered ? 'done' : ''}" aria-labelledby="qt${i}">
       <div class="q-header"><div class="q-num" id="qn${i}">第 ${i + 1} 題 / 3</div><div class="${qSourceTagClass()}">${qSourceLabel()}｜${diff.label}</div></div>
-      <div class="q-text" id="qt${i}">${q.q}</div>
+      <div class="q-text" id="qt${i}">${safeQ}</div>
       <div class="q-options" role="group" aria-labelledby="qn${i}">${opts}</div>${res}</section>`;
     })
     .join('');
@@ -387,6 +399,7 @@ function renderComplete() {
     }
   });
   document.getElementById('backBtn').addEventListener('click', () => {
+    _data.completed = false;
     renderStep();
   });
   document.getElementById('retryBtn').addEventListener('click', () => {

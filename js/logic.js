@@ -18,7 +18,9 @@ export function formatDateKey(d) {
 }
 
 export function yesterdayKey(d) {
-  return formatDateKey(new Date(d.getTime() - 86400000));
+  const prev = new Date(d);
+  prev.setDate(prev.getDate() - 1);
+  return formatDateKey(prev);
 }
 
 export function formatFullDate(d) {
@@ -94,12 +96,24 @@ export function applyDailyResult(hist, { today, yesterday, steps, correct, score
 }
 
 // 重新挑戰時撤銷當日結果（回傳新物件）。
+// 同時從剩餘 log 重算 streak/lastDate，避免撤銷後保留虛高的連勝紀錄。
 export function revertDailyResult(hist, { today, score }) {
-  return {
-    ...hist,
-    total: hist.total - score,
-    log: hist.log.filter((d) => d.date !== today),
-  };
+  const log = hist.log.filter((d) => d.date !== today);
+  const qualifying = log.filter((e) => e.steps >= STREAK_STEP_GOAL);
+  let streak = 0;
+  let lastDate = null;
+  if (qualifying.length > 0) {
+    lastDate = qualifying.at(-1).date;
+    streak = 1;
+    for (let i = qualifying.length - 1; i > 0; i--) {
+      const curr = new Date(qualifying[i].date);
+      const expected = new Date(curr);
+      expected.setDate(expected.getDate() - 1);
+      if (qualifying[i - 1].date === formatDateKey(expected)) streak++;
+      else break;
+    }
+  }
+  return { ...hist, total: hist.total - score, log, streak, lastDate };
 }
 
 // 驗證動態題庫結構：四個難度皆存在、皆為陣列、且各自題目數 >= 最低需求。

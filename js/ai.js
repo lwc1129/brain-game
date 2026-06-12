@@ -1,4 +1,4 @@
-// AI 出題：透過後端 proxy（見 proxy/）取得 Gemini 生成的題目。
+// AI 出題：透過後端 serverless API（見 api/questions.js）取得 Gemini 生成的題目。
 // 前端只送出難度，金鑰由 proxy 端保管，絕不出現在瀏覽器。
 import { CONFIG } from './config.js';
 import { isValidQuestions, QUESTIONS_PER_DAY } from './logic.js';
