@@ -10,6 +10,7 @@ import handler, {
   checkRateLimit,
   getClientKey,
   isValidQuestions,
+  pruneStore,
 } from '../api/questions.js';
 
 // ── 測試輔助 ───────────────────────────────────────────────────────────────
@@ -133,6 +134,50 @@ test('getClientKey：優先取 x-forwarded-for 的第一個 IP', () => {
     '3.3.3.3'
   );
   assert.equal(getClientKey({ headers: {}, socket: {} }), 'unknown');
+});
+
+test('getClientKey：header 開頭為逗號時略過空 token 取下一個有效 IP', () => {
+  assert.equal(
+    getClientKey({ headers: { 'x-forwarded-for': ', 2.2.2.2' }, socket: { remoteAddress: '9.9.9.9' } }),
+    '2.2.2.2'
+  );
+  // 全為空白 token 時退回連線位址，而非空字串（避免多來源誤共用限流桶）
+  assert.equal(
+    getClientKey({ headers: { 'x-forwarded-for': ' , ' }, socket: { remoteAddress: '9.9.9.9' } }),
+    '9.9.9.9'
+  );
+});
+
+test('pruneStore：未超過上限時不動作', () => {
+  const store = new Map();
+  store.set('a', [1000]);
+  pruneStore(store, 1000, 60_000, 10);
+  assert.equal(store.size, 1);
+});
+
+test('pruneStore：所有紀錄皆未過期時仍強制收斂到上限，保留最近活動者', () => {
+  const store = new Map();
+  const now = 1_000_000;
+  // 5 個來源皆在視窗內，最近活動時間遞增（k4 最新）
+  for (let i = 0; i < 5; i++) store.set(`k${i}`, [now - 100 + i]);
+  pruneStore(store, now, 60_000, 3);
+  assert.equal(store.size, 3, '硬上限必須生效，即使所有紀錄都還沒過期');
+  assert.ok(!store.has('k0'), '最久未活動者應被驅逐');
+  assert.ok(!store.has('k1'), '最久未活動者應被驅逐');
+  assert.ok(store.has('k4'), '最近活動者應保留');
+});
+
+test('pruneStore：先移除過期紀錄即足以收斂時不額外驅逐', () => {
+  const store = new Map();
+  const now = 1_000_000;
+  store.set('expired', [now - 120_000]); // 已過期
+  store.set('live1', [now - 10]);
+  store.set('live2', [now - 5]);
+  pruneStore(store, now, 60_000, 2);
+  assert.equal(store.size, 2);
+  assert.ok(!store.has('expired'));
+  assert.ok(store.has('live1'));
+  assert.ok(store.has('live2'));
 });
 
 // ── 內部工具 ───────────────────────────────────────────────────────────────

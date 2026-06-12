@@ -37,10 +37,16 @@ function rateLimitConfig() {
 }
 
 // 取得用戶端識別碼。Vercel 會在 x-forwarded-for 帶入真實 IP（可能含多個，
-// 取第一個為原始來源），退而求其次使用連線位址。
+// 取第一個有效者為原始來源），退而求其次使用連線位址。
+// 注意要略過空白 token（例如 header 以逗號開頭），避免多個來源誤共用同一限流桶。
 export function getClientKey(req) {
   const xff = req.headers?.['x-forwarded-for'];
-  if (typeof xff === 'string' && xff.trim()) return xff.split(',')[0].trim();
+  if (typeof xff === 'string') {
+    for (const part of xff.split(',')) {
+      const ip = part.trim();
+      if (ip) return ip;
+    }
+  }
   return req.socket?.remoteAddress || 'unknown';
 }
 
@@ -57,15 +63,25 @@ export function checkRateLimit(store, key, now, max, windowMs) {
   return { allowed: true, remaining: Math.max(0, max - hits.length), retryAfterMs: 0 };
 }
 
-// 清掉過期的限流紀錄，避免長期執行下 Map 無限膨脹。
-function pruneStore(store, now, windowMs) {
-  if (store.size <= MAX_TRACKED_KEYS) return;
+// 將限流表收斂在 maxKeys 之內，保證記憶體有硬上限。
+// 正常情況（未超量）直接略過，維持低成本；一旦超量才動作：
+//   1) 先移除已過期的來源紀錄
+//   2) 若仍超量（例如大量不同來源在同一視窗內湧入，每筆都還沒過期），
+//      強制驅逐「最久未活動」的來源直到符合上限。
+//      被驅逐者的限流計數會重置，是為了換取記憶體上限的可接受取捨。
+export function pruneStore(store, now, windowMs, maxKeys) {
+  if (store.size <= maxKeys) return;
   const cutoff = now - windowMs;
   for (const [k, hits] of store) {
     const live = hits.filter((t) => t > cutoff);
     if (live.length === 0) store.delete(k);
-    else store.set(k, live);
+    else if (live.length !== hits.length) store.set(k, live);
   }
+  if (store.size <= maxKeys) return;
+  const byRecency = [...store.entries()].sort(
+    (a, b) => a[1][a[1].length - 1] - b[1][b[1].length - 1]
+  );
+  for (let i = 0, n = store.size - maxKeys; i < n; i++) store.delete(byRecency[i][0]);
 }
 
 const DIFF_DESC = {
@@ -160,7 +176,7 @@ export default async function handler(req, res) {
   // 限流：在呼叫 Gemini 之前先擋，保護 API 配額不被任意來源洗版。
   const { max, windowMs } = rateLimitConfig();
   const now = Date.now();
-  pruneStore(_hits, now, windowMs);
+  pruneStore(_hits, now, windowMs, MAX_TRACKED_KEYS);
   const rl = checkRateLimit(_hits, getClientKey(req), now, max, windowMs);
   res.setHeader('X-RateLimit-Limit', String(max));
   res.setHeader('X-RateLimit-Remaining', String(rl.remaining));
