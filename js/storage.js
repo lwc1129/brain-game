@@ -91,9 +91,9 @@ export function readAiCache(today, diffKey) {
 
 export function writeAiCache(today, diffKey, questions) {
   write(aiCacheKey(today, diffKey), JSON.stringify(questions));
-  write(`ai-flag:${APP_NAMESPACE}:${aiCacheKey(today, diffKey)}`, '1');
+  write(`ai-flag:${aiCacheKey(today, diffKey)}`, '1');
 }
 
 export function isAiGeneratedForDiff(today, diffKey) {
-  return read(`ai-flag:${APP_NAMESPACE}:${aiCacheKey(today, diffKey)}`) === '1';
+  return read(`ai-flag:${aiCacheKey(today, diffKey)}`) === '1';
 }

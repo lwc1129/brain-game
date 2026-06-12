@@ -44,30 +44,40 @@ function isValidQuestions(qs) {
         q.opts.length === 4 &&
         q.opts.every((o) => typeof o === 'string') &&
         q.opts.includes(q.a)
-    )
+    ) &&
+    new Set(qs.map((q) => q.q)).size === qs.length
   );
 }
 
 async function callGemini(diffKey, apiKey) {
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-goog-api-key': apiKey,
-      },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: buildPrompt(diffKey) }] }],
-        generationConfig: {
-          temperature: 0.7,
-          maxOutputTokens: 512,
-          responseMimeType: 'application/json',
+  let res;
+  try {
+    res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent`,
+      {
+        method: 'POST',
+        signal: AbortSignal.timeout(25000),
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': apiKey,
         },
-      }),
-    }
-  );
-  if (!res.ok) return null;
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: buildPrompt(diffKey) }] }],
+          generationConfig: {
+            temperature: 0.7,
+            maxOutputTokens: 1536,
+            responseMimeType: 'application/json',
+          },
+        }),
+      }
+    );
+  } catch {
+    return null;
+  }
+  if (!res.ok) {
+    console.error(`Gemini API error: ${res.status} ${res.statusText}`);
+    return null;
+  }
   const data = await res.json();
   const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
   let qs;
@@ -87,10 +97,9 @@ async function callGemini(diffKey, apiKey) {
 
 export default async function handler(req, res) {
   const origin = req.headers.origin || '';
-  const allowed = (process.env.ALLOWED_ORIGINS || DEFAULT_ALLOWED_ORIGINS)
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
+  const allowedStr = (process.env.ALLOWED_ORIGINS || '').trim() || DEFAULT_ALLOWED_ORIGINS;
+  const allowed = allowedStr.split(',').map((s) => s.trim()).filter(Boolean);
+  if (allowed.length === 0) allowed.push(DEFAULT_ALLOWED_ORIGINS);
   res.setHeader('Access-Control-Allow-Origin', allowed.includes(origin) ? origin : allowed[0]);
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');

@@ -148,9 +148,9 @@ def validate_questions(data):
                 raise ValueError(f"難度 {diff} 第 {idx} 題的 a 必須是非空字串")
 
             opts = q["opts"]
-            if not isinstance(opts, list) or len(opts) < 2:
+            if not isinstance(opts, list) or len(opts) != 4:
                 raise ValueError(
-                    f"難度 {diff} 第 {idx} 題的 opts 必須是至少 2 個選項的陣列"
+                    f"難度 {diff} 第 {idx} 題的 opts 必須是 4 個選項的陣列"
                 )
             if not all(isinstance(o, str) for o in opts):
                 raise ValueError(f"難度 {diff} 第 {idx} 題的 opts 必須全部為字串")
@@ -201,6 +201,17 @@ def merge_question_banks(existing, new):
         combined = []
         for q in list(old_qs) + list(new_qs):
             if not isinstance(q, dict):
+                continue
+            if any(field not in q for field in REQUIRED_QUESTION_FIELDS):
+                continue
+            if (
+                not isinstance(q.get("type"), str) or not q["type"].strip()
+                or not isinstance(q.get("q"), str) or not q["q"].strip()
+                or not isinstance(q.get("a"), str) or not q["a"].strip()
+                or not isinstance(q.get("opts"), list) or len(q["opts"]) != 4
+                or not all(isinstance(o, str) for o in q["opts"])
+                or q["a"] not in q["opts"]
+            ):
                 continue
             key = normalize_question_text(q.get("q", ""))
             if not key or key in seen:
