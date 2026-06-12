@@ -413,11 +413,11 @@ def gen_hard():
         make_q("計算", f"長方形長{a}公分、寬{b}公分，面積是幾平方公分？", a * b, num_distractors(a * b, low=1))
         for a, b in rects[:15]
     ]
-    ropes = [(f, l) for f in (2, 3) for l in range(6, 26, 2)]
+    ropes = [(f, length) for f in (2, 3) for length in range(6, 26, 2)]
     rng.shuffle(ropes)
     out += [
-        make_q("計算", f"一條繩子對折{ '兩' if f == 2 else '三' }次後長{l}公分，原本長幾公分？", l * 2**f, num_distractors(l * 2**f, low=1))
-        for f, l in ropes[:12]
+        make_q("計算", f"一條繩子對折{ '兩' if f == 2 else '三' }次後長{length}公分，原本長幾公分？", length * 2**f, num_distractors(length * 2**f, low=1))
+        for f, length in ropes[:12]
     ]
     reads = [(p, d) for p in range(15, 50, 5) for d in range(6, 13)]
     rng.shuffle(reads)
