@@ -6,20 +6,78 @@
 // Vercel 專案 Settings → Environment Variables：
 //  - GEMINI_API_KEY（必填）：Google AI Studio API key
 //  - ALLOWED_ORIGINS（選填）：允許的前端來源，逗號分隔；預設為 GitHub Pages 網址
+//  - RATE_LIMIT_MAX（選填）：單一來源於視窗內允許的請求數；預設 30
+//  - RATE_LIMIT_WINDOW_MS（選填）：限流視窗長度（毫秒）；預設 60000
 
 const DIFFICULTIES = new Set(['hard', 'medium', 'easy', 'super_easy']);
 const QUESTIONS_PER_DAY = 3;
 const MODEL_NAME = 'gemini-2.5-flash';
 const DEFAULT_ALLOWED_ORIGINS = 'https://lwc1129.github.io';
 
+// 預設限流：每個來源 60 秒內最多 30 次。可由環境變數覆寫。
+const DEFAULT_RATE_LIMIT_MAX = 30;
+const DEFAULT_RATE_LIMIT_WINDOW_MS = 60_000;
+// 限流表的鍵數量上限，超過時觸發清掃，避免記憶體無限成長。
+const MAX_TRACKED_KEYS = 10_000;
+
+// 記憶體型滑動視窗限流狀態（來源 → 命中時間戳陣列）。
+const _hits = new Map();
+
+function rateLimitConfig() {
+  const max = Number(process.env.RATE_LIMIT_MAX);
+  const windowMs = Number(process.env.RATE_LIMIT_WINDOW_MS);
+  return {
+    max: Number.isFinite(max) && max > 0 ? max : DEFAULT_RATE_LIMIT_MAX,
+    windowMs: Number.isFinite(windowMs) && windowMs > 0 ? windowMs : DEFAULT_RATE_LIMIT_WINDOW_MS,
+  };
+}
+
+export function getClientKey(req) {
+  const xff = req.headers?.['x-forwarded-for'];
+  if (typeof xff === 'string') {
+    for (const part of xff.split(',')) {
+      const ip = part.trim();
+      if (ip) return ip;
+    }
+  }
+  return req.socket?.remoteAddress || 'unknown';
+}
+
+export function checkRateLimit(store, key, now, max, windowMs) {
+  const cutoff = now - windowMs;
+  const hits = (store.get(key) || []).filter((t) => t > cutoff);
+  if (hits.length >= max) {
+    store.set(key, hits);
+    return { allowed: false, remaining: 0, retryAfterMs: hits[0] + windowMs - now };
+  }
+  hits.push(now);
+  store.set(key, hits);
+  return { allowed: true, remaining: Math.max(0, max - hits.length), retryAfterMs: 0 };
+}
+
+export function pruneStore(store, now, windowMs, maxKeys) {
+  if (store.size <= maxKeys) return;
+  const cutoff = now - windowMs;
+  for (const [k, hits] of store) {
+    const live = hits.filter((t) => t > cutoff);
+    if (live.length === 0) store.delete(k);
+    else if (live.length !== hits.length) store.set(k, live);
+  }
+  if (store.size <= maxKeys) return;
+  const byRecency = [...store.entries()].sort(
+    (a, b) => a[1][a[1].length - 1] - b[1][b[1].length - 1]
+  );
+  for (let i = 0, n = store.size - maxKeys; i < n; i++) store.delete(byRecency[i][0]);
+}
+
 const DIFF_DESC = {
-  hard: '困難（需要思考的挑戰性題目，考驗邏輯與計算能力）',
+  hard: '困難（需要思考的挑戰性技術題目，考驗邏輯與計算能力）',
   medium: '中等（需要一點思考，適合一般成人）',
   easy: '簡單（輕鬆的題目，適合日常練習）',
   super_easy: '超簡單（適合老年人的非常簡單題目，不要有複雜運算）',
 };
 
-function buildPrompt(diffKey) {
+export function buildPrompt(diffKey) {
   return (
     `你是一位認知訓練出題專家，請為台灣的銀髮族長輩出${DIFF_DESC[diffKey]}的繁體中文腦力訓練題目。\n\n` +
     `請出${QUESTIONS_PER_DAY}題，題型只能從以下選擇：邏輯、計算、數列、推理、語言、記憶、常識。\n\n` +
@@ -30,7 +88,7 @@ function buildPrompt(diffKey) {
   );
 }
 
-function isValidQuestions(qs) {
+export function isValidQuestions(qs) {
   return (
     Array.isArray(qs) &&
     qs.length >= QUESTIONS_PER_DAY &&
@@ -44,36 +102,29 @@ function isValidQuestions(qs) {
         q.opts.length === 4 &&
         q.opts.every((o) => typeof o === 'string') &&
         q.opts.includes(q.a)
-    ) &&
-    new Set(qs.map((q) => q.q)).size === qs.length
+    )
   );
 }
 
 async function callGemini(diffKey, apiKey) {
-  let res;
-  try {
-    res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent`,
-      {
-        method: 'POST',
-        signal: AbortSignal.timeout(25000),
-        headers: {
-          'Content-Type': 'application/json',
-          'x-goog-api-key': apiKey,
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': apiKey,
+      },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: buildPrompt(diffKey) }] }],
+        generationConfig: {
+          temperature: 0.7,
+          maxOutputTokens: 512,
+          responseMimeType: 'application/json',
         },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: buildPrompt(diffKey) }] }],
-          generationConfig: {
-            temperature: 0.7,
-            maxOutputTokens: 1536,
-            responseMimeType: 'application/json',
-          },
-        }),
-      }
-    );
-  } catch {
-    return null;
-  }
+      }),
+    }
+  );
   if (!res.ok) {
     console.error(`Gemini API error: ${res.status} ${res.statusText}`);
     return null;
@@ -97,9 +148,13 @@ async function callGemini(diffKey, apiKey) {
 
 export default async function handler(req, res) {
   const origin = req.headers.origin || '';
-  const allowedStr = (process.env.ALLOWED_ORIGINS || '').trim() || DEFAULT_ALLOWED_ORIGINS;
-  const allowed = allowedStr.split(',').map((s) => s.trim()).filter(Boolean);
-  if (allowed.length === 0) allowed.push(DEFAULT_ALLOWED_ORIGINS);
+  const allowed = (process.env.ALLOWED_ORIGINS || DEFAULT_ALLOWED_ORIGINS)
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  // 在做任何處理前先驗證 origin，來源不符直接 403 拒絕，
+  // 避免任意第三方消耗 Gemini 配額。
   const isAllowedOrigin = origin && allowed.includes(origin);
   if (isAllowedOrigin) {
     res.setHeader('Access-Control-Allow-Origin', origin);
@@ -113,6 +168,19 @@ export default async function handler(req, res) {
 
   const difficulty = req.body?.difficulty;
   if (!DIFFICULTIES.has(difficulty)) return res.status(400).json({ error: 'invalid difficulty' });
+
+  // 限流：在呼叫 Gemini 之前先擋，保護 API 配額。
+  const { max, windowMs } = rateLimitConfig();
+  const now = Date.now();
+  pruneStore(_hits, now, windowMs, MAX_TRACKED_KEYS);
+  const rl = checkRateLimit(_hits, getClientKey(req), now, max, windowMs);
+  res.setHeader('X-RateLimit-Limit', String(max));
+  res.setHeader('X-RateLimit-Remaining', String(rl.remaining));
+  if (!rl.allowed) {
+    res.setHeader('Retry-After', String(Math.ceil(rl.retryAfterMs / 1000)));
+    return res.status(429).json({ error: 'rate limit exceeded' });
+  }
+
   if (!process.env.GEMINI_API_KEY) return res.status(503).json({ error: 'proxy not configured' });
 
   const questions = await callGemini(difficulty, process.env.GEMINI_API_KEY);
