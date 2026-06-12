@@ -19,6 +19,7 @@ js/
 tests/logic.test.mjs        前端邏輯單元測試（node --test）
 api/questions.js            Vercel Serverless Function：Gemini API 代理（金鑰保管處）
 generate_questions.py       每週題庫擴充腳本（合併＋去重＋上限）
+seed_questions.py           一次性種題腳本（把各難度補滿到 300 題，可重現）
 test_generate_questions.py  題庫腳本單元測試
 questions.json              動態題庫（GitHub Actions 每週自動擴充）
 ```
@@ -47,9 +48,11 @@ questions.json              動態題庫（GitHub Actions 每週自動擴充）
 
 ## 題庫
 
-- 內建 fallback 題庫 120 題（hard / medium / easy / super_easy 各 30 題），離線可玩。
-- `questions.json` 由 GitHub Actions 每週呼叫 Gemini 自動「擴充」：
-  新題與舊題合併、以題目文字去重、每難度上限 200 題（超過時淘汰最舊）。
+- `questions.json` 共 1200 題（hard / medium / easy / super_easy 各 300 題），
+  由 `seed_questions.py` 一次性產生（參數化模板＋人工編寫內容，固定種子可重現）。
+- 內建 fallback 題庫 120 題（各難度 30 題），questions.json 載入失敗時離線可玩。
+- GitHub Actions 每週呼叫 Gemini 自動「擴充」：新題與舊題合併、
+  以題目文字去重、每難度上限 300 題（超過時淘汰最舊）。
 - 前端記錄每個難度最近 21 題（約一週份量），抽題時優先排除，降低重複感。
 - 選項順序在出題時隨機打亂。
 
@@ -82,5 +85,5 @@ CI（`.github/workflows/test.yml`）會在 push / PR 時跑上述測試，
 ## 部署
 
 - push 到 `main` 後由 `.github/workflows/deploy.yml` 部署至 GitHub Pages。
-- 每週日 UTC 16:00（台灣週一 00:00）由 `.github/workflows/update_questions.yml`
+- 每週日 UTC 19:00（台灣週一凌晨 03:00）由 `.github/workflows/update_questions.yml`
   自動擴充題庫。
