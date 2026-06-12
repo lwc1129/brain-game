@@ -14,20 +14,25 @@ import unittest
 
 from generate_questions import (
     DIFFICULTIES,
+    MAX_PER_DIFFICULTY,
     MIN_PER_DIFFICULTY,
+    merge_question_banks,
     parse_response_text,
     validate_questions,
 )
 
 
-def _make_question(answer="A"):
-    return {"type": "計算", "q": "1 + 1 = ?", "a": answer, "opts": ["A", "B", "C", "D"]}
+def _make_question(answer="A", text="1 + 1 = ?"):
+    return {"type": "計算", "q": text, "a": answer, "opts": ["A", "B", "C", "D"]}
 
 
 def _make_valid_data():
     data = {}
     for diff in DIFFICULTIES:
-        data[diff] = [_make_question() for _ in range(MIN_PER_DIFFICULTY)]
+        data[diff] = [
+            _make_question(text=f"{diff} 範例題 {i}？")
+            for i in range(MIN_PER_DIFFICULTY)
+        ]
     return data
 
 
@@ -110,6 +115,53 @@ class TestValidateQuestions(unittest.TestCase):
         data["hard"][0] = "not-a-dict"
         with self.assertRaises(ValueError):
             validate_questions(data)
+
+
+class TestMergeQuestionBanks(unittest.TestCase):
+    def _bank(self, texts):
+        return {diff: [_make_question(text=t) for t in texts] for diff in DIFFICULTIES}
+
+    def test_new_questions_appended_after_existing(self):
+        existing = self._bank(["舊題一？", "舊題二？"])
+        new = self._bank(["新題一？"])
+        merged = merge_question_banks(existing, new)
+        for diff in DIFFICULTIES:
+            self.assertEqual(
+                [q["q"] for q in merged[diff]], ["舊題一？", "舊題二？", "新題一？"]
+            )
+
+    def test_duplicate_question_text_kept_once(self):
+        existing = self._bank(["同一題？"])
+        new = self._bank(["同一題？", "新題？"])
+        merged = merge_question_banks(existing, new)
+        for diff in DIFFICULTIES:
+            self.assertEqual([q["q"] for q in merged[diff]], ["同一題？", "新題？"])
+
+    def test_dedupe_ignores_whitespace_differences(self):
+        existing = self._bank(["1 + 1 = ?"])
+        new = self._bank(["1+1=?"])
+        merged = merge_question_banks(existing, new)
+        for diff in DIFFICULTIES:
+            self.assertEqual(len(merged[diff]), 1)
+
+    def test_cap_drops_oldest_questions(self):
+        existing = self._bank([f"舊題 {i}？" for i in range(MAX_PER_DIFFICULTY)])
+        new = self._bank(["新題？"])
+        merged = merge_question_banks(existing, new)
+        for diff in DIFFICULTIES:
+            self.assertEqual(len(merged[diff]), MAX_PER_DIFFICULTY)
+            self.assertEqual(merged[diff][-1]["q"], "新題？")
+            self.assertEqual(merged[diff][0]["q"], "舊題 1？")
+
+    def test_missing_or_invalid_existing_bank_tolerated(self):
+        new = _make_valid_data()
+        self.assertEqual(merge_question_banks({}, new), new)
+        merged = merge_question_banks({"hard": "not-a-list"}, new)
+        self.assertEqual(merged, new)
+
+    def test_merged_bank_passes_validation(self):
+        merged = merge_question_banks(_make_valid_data(), self._bank(["另一題？"]))
+        self.assertTrue(validate_questions(merged))
 
 
 if __name__ == "__main__":

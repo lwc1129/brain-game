@@ -2,8 +2,8 @@ name: 每週自動更新題庫
 
 on:
   schedule:
-    # 台灣週一 00:00 = UTC 週日 16:00
-    - cron: '0 16 * * 0'
+    # 台灣週一 03:00 = UTC 週日 19:00
+    - cron: '0 19 * * 0'
   workflow_dispatch:
 
 permissions:
