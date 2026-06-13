@@ -16,11 +16,13 @@ js/
   ai.js                     AI 出題（一律經由後端 proxy，前端無金鑰）
   analytics.js              GA4 事件
   app.js                    畫面渲染與事件繫結（進入點）
-tests/logic.test.mjs        前端邏輯單元測試（node --test）
+tests/
+  logic.test.mjs            前端遊戲邏輯單元測試（19 個測試，node --test）
+  proxy.test.mjs            AI proxy 單元測試（21 個測試，涵蓋限流、CORS、handler）
 api/questions.js            Vercel Serverless Function：Gemini API 代理（金鑰保管處）
 generate_questions.py       每週題庫擴充腳本（合併＋去重＋上限）
 seed_questions.py           一次性種題腳本（把各難度補滿到 300 題，可重現）
-test_generate_questions.py  題庫腳本單元測試
+test_generate_questions.py  題庫腳本單元測試（20 個測試）
 questions.json              動態題庫（GitHub Actions 每週自動擴充）
 ```
 
@@ -29,6 +31,10 @@ questions.json              動態題庫（GitHub Actions 每週自動擴充）
 - **前端與部署產物中沒有任何金鑰。** AI 出題經由 `api/questions.js`
   （Vercel Serverless Function）代理，金鑰存在 Vercel 環境變數，
   並以 `ALLOWED_ORIGINS` 限制來源（預設只允許本專案的 GitHub Pages）。
+- **Rate limiting**：proxy 對每個來源（IP）實施滑動視窗限流（預設：60 秒內最多 30 次），
+  於呼叫 Gemini 前先擋，防止 API 配額被洗版。回應帶有
+  `X-RateLimit-Limit`、`X-RateLimit-Remaining`、`Retry-After` 標頭。
+  限流為單 Vercel 實例防護；若需跨實例全域限流，可改接 KV / Redis。
 - `js/config.js` 的 `AI_PROXY_URL` 是可公開的 proxy 網址；未設定時，
   前端自動改用題庫出題，遊戲功能完整可用。GitHub repository variable
   `AI_PROXY_URL` 可在部署時覆寫它。
@@ -39,8 +45,15 @@ questions.json              動態題庫（GitHub Actions 每週自動擴充）
 1. 到 [Google AI Studio](https://aistudio.google.com/apikey) 申請 API key
    （舊 key 若曾被舊版部署流程寫進前端，請作廢重發）。
 2. 到 [vercel.com/new](https://vercel.com/new) 匯入本 repo，
-   Framework Preset 選「Other」，並在 Environment Variables 加上
-   `GEMINI_API_KEY`，按 Deploy。
+   Framework Preset 選「Other」，並在 Environment Variables 加上必填與選填變數，按 Deploy：
+
+   | 環境變數 | 必填 | 說明 |
+   |---|---|---|
+   | `GEMINI_API_KEY` | 必填 | Google AI Studio API key（使用 `gemini-2.5-flash` 模型） |
+   | `ALLOWED_ORIGINS` | 選填 | 允許的前端來源，逗號分隔；預設 `https://lwc1129.github.io` |
+   | `RATE_LIMIT_MAX` | 選填 | 單一 IP 於視窗內最多請求數；預設 `30` |
+   | `RATE_LIMIT_WINDOW_MS` | 選填 | 限流視窗長度（毫秒）；預設 `60000` |
+
 3. 把部署後的網域（例如 `https://brain-game-xxx.vercel.app`）加上
    `/api/questions` 路徑，到 GitHub repo 的 **Settings → Secrets and variables → Actions → Variables**，
    新增 Repository variable `AI_PROXY_URL`（名稱需與 `.github/workflows/deploy.yml` 一致）。
@@ -79,7 +92,7 @@ python3 -m http.server 8000   # 開啟 http://localhost:8000
 
 ```bash
 python -m unittest test_generate_questions -v   # 題庫腳本（20 個測試）
-node --test tests/*.test.mjs                    # 前端邏輯（19 個測試）
+node --test tests/*.test.mjs                    # 前端邏輯 + proxy（共 40 個測試）
 ```
 
 CI（`.github/workflows/test.yml`）會在 push / PR 時跑上述測試，
