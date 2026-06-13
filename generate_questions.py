@@ -32,7 +32,7 @@ DIFFICULTIES = ["hard", "medium", "easy", "super_easy"]
 MIN_PER_DIFFICULTY = 3
 
 # 合併後每個難度的題數上限，超過時淘汰最舊的題目。
-MAX_PER_DIFFICULTY = 200
+MAX_PER_DIFFICULTY = 300
 
 # 每題必要欄位。
 REQUIRED_QUESTION_FIELDS = ["type", "q", "a", "opts"]

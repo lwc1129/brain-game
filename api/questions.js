@@ -21,6 +21,10 @@ const DEFAULT_RATE_LIMIT_WINDOW_MS = 60_000;
 const MAX_TRACKED_KEYS = 10_000;
 
 // 記憶體型滑動視窗限流狀態（來源 → 命中時間戳陣列）。
+//
+// 注意：Vercel serverless 為多實例且會冷啟動，此限流為「盡力而為」的單實例
+// 防護——能擋下單一來源在熱實例上的洗版，避免任意人打爆 Gemini 配額；但無法
+// 跨實例共享狀態。若需嚴格的全域限流，應改接 Vercel KV / Upstash Redis。
 const _hits = new Map();
 
 function rateLimitConfig() {
@@ -32,6 +36,9 @@ function rateLimitConfig() {
   };
 }
 
+// 取得用戶端識別碼。Vercel 會在 x-forwarded-for 帶入真實 IP（可能含多個，
+// 取第一個有效者為原始來源），退而求其次使用連線位址。
+// 注意要略過空白 token（例如 header 以逗號開頭），避免多個來源誤共用同一限流桶。
 export function getClientKey(req) {
   const xff = req.headers?.['x-forwarded-for'];
   if (typeof xff === 'string') {
@@ -43,6 +50,7 @@ export function getClientKey(req) {
   return req.socket?.remoteAddress || 'unknown';
 }
 
+// 滑動視窗限流純函式：依現存命中時間戳判斷是否放行，並就地更新 store。
 export function checkRateLimit(store, key, now, max, windowMs) {
   const cutoff = now - windowMs;
   const hits = (store.get(key) || []).filter((t) => t > cutoff);
@@ -55,6 +63,12 @@ export function checkRateLimit(store, key, now, max, windowMs) {
   return { allowed: true, remaining: Math.max(0, max - hits.length), retryAfterMs: 0 };
 }
 
+// 將限流表收斂在 maxKeys 之內，保證記憶體有硬上限。
+// 正常情況（未超量）直接略過，維持低成本；一旦超量才動作：
+//   1) 先移除已過期的來源紀錄
+//   2) 若仍超量（例如大量不同來源在同一視窗內湧入，每筆都還沒過期），
+//      強制驅逐「最久未活動」的來源直到符合上限。
+//      被驅逐者的限流計數會重置，是為了換取記憶體上限的可接受取捨。
 export function pruneStore(store, now, windowMs, maxKeys) {
   if (store.size <= maxKeys) return;
   const cutoff = now - windowMs;
@@ -169,7 +183,7 @@ export default async function handler(req, res) {
   const difficulty = req.body?.difficulty;
   if (!DIFFICULTIES.has(difficulty)) return res.status(400).json({ error: 'invalid difficulty' });
 
-  // 限流：在呼叫 Gemini 之前先擋，保護 API 配額。
+  // 限流：在呼叫 Gemini 之前先擋，保護 API 配額不被任意來源洗版。
   const { max, windowMs } = rateLimitConfig();
   const now = Date.now();
   pruneStore(_hits, now, windowMs, MAX_TRACKED_KEYS);

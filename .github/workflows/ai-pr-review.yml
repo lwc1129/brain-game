@@ -37,8 +37,10 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
+          # 經由 env 傳遞而非 ${{ }} 內插進腳本：避免 diff 內容被當成
+          # shell 指令執行（大 PR 必炸，且有 script injection 風險）。
+          DIFF: ${{ steps.diff.outputs.content }}
         run: |
-          DIFF="${{ steps.diff.outputs.content }}"
           FULL_LINE_COUNT=$(git diff origin/main...HEAD -- . \
             ':(exclude).github/' \
             ':(exclude)*.json' | wc -l)
@@ -95,8 +97,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
+          # 同 claude-review：diff 一律走 env，不可內插進腳本。
+          DIFF: ${{ steps.diff.outputs.content }}
         run: |
-          DIFF="${{ steps.diff.outputs.content }}"
           FULL_LINE_COUNT=$(git diff origin/main...HEAD -- . \
             ':(exclude).github/' \
             ':(exclude)*.json' | wc -l)
