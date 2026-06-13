@@ -180,6 +180,9 @@ test('revertDailyResult 撤銷當日分數與記錄', () => {
   assert.equal(next.total, 100);
   assert.equal(next.log.length, 1);
   assert.equal(next.log[0].date, '2026-06-09');
+  // streak/lastDate 必須回滾，不能保留撤銷前的虛高連勝
+  assert.equal(next.streak, 1);
+  assert.equal(next.lastDate, '2026-06-09');
 });
 
 // ── 題庫驗證 ─────────────────────────────────────────────────────────────

@@ -42,9 +42,12 @@ questions.json              動態題庫（GitHub Actions 每週自動擴充）
    Framework Preset 選「Other」，並在 Environment Variables 加上
    `GEMINI_API_KEY`，按 Deploy。
 3. 把部署後的網域（例如 `https://brain-game-xxx.vercel.app`）加上
-   `/api/questions` 路徑，填入 `js/config.js` 的 `AI_PROXY_URL`。
+   `/api/questions` 路徑，到 GitHub repo 的 **Settings → Secrets and variables → Actions → Variables**，
+   新增 Repository variable `AI_PROXY_URL`（名稱需與 `.github/workflows/deploy.yml` 一致）。
+   `js/config.js` 請保持提交時的空白預設值，不要直接編輯——
+   deploy workflow 會在部署時自動注入此值；GitHub Pages 只在此變數存在時才會啟用 AI 出題。
 
-之後每次 push，Vercel 會自動重新部署 proxy；GitHub Pages 照常部署遊戲本體。
+之後每次 push，Vercel 會自動重新部署 API；GitHub Pages 照常部署遊戲本體。
 
 ## 題庫
 

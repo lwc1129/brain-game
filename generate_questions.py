@@ -148,9 +148,9 @@ def validate_questions(data):
                 raise ValueError(f"難度 {diff} 第 {idx} 題的 a 必須是非空字串")
 
             opts = q["opts"]
-            if not isinstance(opts, list) or len(opts) < 2:
+            if not isinstance(opts, list) or len(opts) != 4:
                 raise ValueError(
-                    f"難度 {diff} 第 {idx} 題的 opts 必須是至少 2 個選項的陣列"
+                    f"難度 {diff} 第 {idx} 題的 opts 必須是 4 個選項的陣列"
                 )
             if not all(isinstance(o, str) for o in opts):
                 raise ValueError(f"難度 {diff} 第 {idx} 題的 opts 必須全部為字串")
@@ -168,20 +168,16 @@ def normalize_question_text(text):
 
 
 def load_existing_bank(path):
-    """讀取既有題庫。檔案不存在、無法解析或結構不符時回傳空題庫。
-
-    既有題庫損壞不應讓整次更新失敗（新題庫仍會經過完整驗證），
-    因此這裡容錯處理、僅輸出警告。
-    """
+    """讀取既有題庫。檔案不存在時回傳空題庫；讀取或解析失敗時中止以防覆寫資料。"""
+    if not os.path.exists(path):
+        return {}
     try:
         with open(path, encoding="utf-8") as f:
             data = json.load(f)
     except (OSError, json.JSONDecodeError) as exc:
-        print(f"警告：無法讀取既有題庫，視為空題庫：{exc}", file=sys.stderr)
-        return {}
+        raise ValueError(f"無法讀取既有題庫，為避免覆寫資料已中止：{exc}") from exc
     if not isinstance(data, dict):
-        print("警告：既有題庫結構不符，視為空題庫", file=sys.stderr)
-        return {}
+        raise ValueError("既有題庫結構不符，為避免覆寫資料已中止")
     return data
 
 
@@ -201,6 +197,17 @@ def merge_question_banks(existing, new):
         combined = []
         for q in list(old_qs) + list(new_qs):
             if not isinstance(q, dict):
+                continue
+            if any(field not in q for field in REQUIRED_QUESTION_FIELDS):
+                continue
+            if (
+                not isinstance(q.get("type"), str) or not q["type"].strip()
+                or not isinstance(q.get("q"), str) or not q["q"].strip()
+                or not isinstance(q.get("a"), str) or not q["a"].strip()
+                or not isinstance(q.get("opts"), list) or len(q["opts"]) != 4
+                or not all(isinstance(o, str) for o in q["opts"])
+                or q["a"] not in q["opts"]
+            ):
                 continue
             key = normalize_question_text(q.get("q", ""))
             if not key or key in seen:

@@ -34,11 +34,17 @@ jobs:
           GA_MEASUREMENT_ID: ${{ secrets.GA_MEASUREMENT_ID }}
           AI_PROXY_URL: ${{ vars.AI_PROXY_URL }}
         run: |
+          set -euo pipefail
+          esc() { printf '%s' "$1" | sed 's/[\\|&]/\\&/g'; }
           if [ -n "${GA_MEASUREMENT_ID}" ]; then
-            sed -i "s|GA_MEASUREMENT_ID: '[^']*'|GA_MEASUREMENT_ID: '${GA_MEASUREMENT_ID}'|" js/config.js
+            GA_ESC="$(esc "${GA_MEASUREMENT_ID}")"
+            sed -i "s|GA_MEASUREMENT_ID: '[^']*'|GA_MEASUREMENT_ID: '${GA_ESC}'|" js/config.js
+            grep -q "GA_MEASUREMENT_ID: '${GA_ESC}'" js/config.js
           fi
           if [ -n "${AI_PROXY_URL}" ]; then
-            sed -i "s|AI_PROXY_URL: '[^']*'|AI_PROXY_URL: '${AI_PROXY_URL}'|" js/config.js
+            PROXY_ESC="$(esc "${AI_PROXY_URL}")"
+            sed -i "s|AI_PROXY_URL: '[^']*'|AI_PROXY_URL: '${PROXY_ESC}'|" js/config.js
+            grep -q "AI_PROXY_URL: '${PROXY_ESC}'" js/config.js
           fi
 
       - uses: actions/configure-pages@v5

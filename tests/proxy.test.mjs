@@ -225,11 +225,12 @@ test('handler：CORS 允許清單命中時回傳該來源', async () => {
   assert.equal(res.headers['access-control-allow-origin'], 'https://lwc1129.github.io');
 });
 
-test('handler：CORS 來源不在白名單時退回第一個允許來源', async () => {
+test('handler：CORS 來源不在白名單時回 403 且不設 CORS header', async () => {
   const req = makeReq({ method: 'OPTIONS', origin: 'https://evil.example', ip: freshIp() });
   const res = makeRes();
   await handler(req, res);
-  assert.equal(res.headers['access-control-allow-origin'], 'https://lwc1129.github.io');
+  assert.equal(res.statusCode, 403);
+  assert.equal(res.headers['access-control-allow-origin'], undefined);
 });
 
 // ── handler：金鑰與 Gemini 呼叫 ─────────────────────────────────────────────

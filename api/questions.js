@@ -85,7 +85,7 @@ export function pruneStore(store, now, windowMs, maxKeys) {
 }
 
 const DIFF_DESC = {
-  hard: '困難（需要思考的挑戰性題目，考驗邏輯與計算能力）',
+  hard: '困難（需要思考的挑戰性技術題目，考驗邏輯與計算能力）',
   medium: '中等（需要一點思考，適合一般成人）',
   easy: '簡單（輕鬆的題目，適合日常練習）',
   super_easy: '超簡單（適合老年人的非常簡單題目，不要有複雜運算）',
@@ -139,7 +139,10 @@ async function callGemini(diffKey, apiKey) {
       }),
     }
   );
-  if (!res.ok) return null;
+  if (!res.ok) {
+    console.error(`Gemini API error: ${res.status} ${res.statusText}`);
+    return null;
+  }
   const data = await res.json();
   const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
   let qs;
@@ -163,10 +166,17 @@ export default async function handler(req, res) {
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean);
-  res.setHeader('Access-Control-Allow-Origin', allowed.includes(origin) ? origin : allowed[0]);
+
+  // 在做任何處理前先驗證 origin，來源不符直接 403 拒絕，
+  // 避免任意第三方消耗 Gemini 配額。
+  const isAllowedOrigin = origin && allowed.includes(origin);
+  if (isAllowedOrigin) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  }
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
+  if (!isAllowedOrigin) return res.status(403).json({ error: 'origin not allowed' });
   if (req.method === 'OPTIONS') return res.status(204).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'method not allowed' });
 
