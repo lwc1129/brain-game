@@ -382,7 +382,7 @@ function renderComplete() {
     </section>
     <div class="sponsor-card">
       <p class="sponsor-msg">喜歡每日認知挑戰？用一杯咖啡支持我們繼續做下去 ☕</p>
-      <a href="https://portaly.cc/start/newMode" target="_blank" rel="noopener noreferrer" class="btn-sponsor">支持我們</a>
+      <a href="https://portaly.cc/linus" target="_blank" rel="noopener noreferrer" class="btn-sponsor">支持我們</a>
     </div>
     <div class="fnote">完成後截圖或點複製，把今日成果傳給家人 😊</div>`;
   document.getElementById('copyBtn').addEventListener('click', () => {
