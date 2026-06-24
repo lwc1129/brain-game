@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#c8431a"/>
+      <stop offset="60%" stop-color="#d96d3f"/>
+      <stop offset="100%" stop-color="#b88a3e"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <circle cx="1080" cy="80" r="160" fill="#ffffff" opacity="0.07"/>
+  <circle cx="90" cy="560" r="120" fill="#ffffff" opacity="0.06"/>
+  <text x="600" y="270" font-family="'Noto Serif TC', serif" font-size="40" font-weight="700" letter-spacing="6" fill="#fffbf2" text-anchor="middle" opacity="0.85">DAILY BRAIN</text>
+  <text x="600" y="360" font-family="'Noto Serif TC', serif" font-size="92" font-weight="900" letter-spacing="4" fill="#ffffff" text-anchor="middle">每日認知挑戰</text>
+  <text x="600" y="430" font-family="'Noto Serif TC', serif" font-size="34" font-weight="500" fill="#fffbf2" text-anchor="middle" opacity="0.92">給長者的免費腦力訓練遊戲</text>
+  <text x="600" y="490" font-family="'Noto Serif TC', serif" font-size="26" font-weight="500" fill="#fffbf2" text-anchor="middle" opacity="0.8">走得多，題目輕鬆｜走得少，多動腦補回來</text>
+</svg>
