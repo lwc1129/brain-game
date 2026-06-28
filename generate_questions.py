@@ -39,7 +39,7 @@ REQUIRED_QUESTION_FIELDS = ["type", "q", "a", "opts"]
 
 OUTPUT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "questions.json")
 
-MODEL_NAME = "gemini-1.5-flash"
+MODEL_NAME = "gemini-2.5-flash"
 
 
 def build_prompt():
