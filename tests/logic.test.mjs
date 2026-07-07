@@ -73,6 +73,52 @@ test('pickQuestions 題池小於需求時全數回傳', () => {
   assert.equal(pickQuestions(pool, 3).length, 1);
 });
 
+function makeTypedQuestion(type, text) {
+  return { ...makeQuestion(text), type };
+}
+
+test('pickQuestions 題型多樣性：題型足夠時單場三題皆不同題型', () => {
+  const pool = [];
+  for (const type of ['計算', '邏輯', '記憶', '常識']) {
+    for (let i = 0; i < 5; i++) pool.push(makeTypedQuestion(type, `${type} 題 ${i}？`));
+  }
+  for (let i = 0; i < 20; i++) {
+    const picked = pickQuestions(pool, 3);
+    assert.equal(new Set(picked.map((q) => q.type)).size, 3, '三題應為三種不同題型');
+  }
+});
+
+test('pickQuestions 題型多樣性：題池只有單一題型時仍抽滿', () => {
+  const pool = Array.from({ length: 10 }, (_, i) => makeQuestion(`題 ${i}？`));
+  const picked = pickQuestions(pool, 3);
+  assert.equal(picked.length, 3);
+  assert.equal(new Set(picked.map((q) => q.q)).size, 3, '題目不可重複');
+});
+
+test('pickQuestions 題型多樣性：兩種題型時涵蓋兩種', () => {
+  const pool = [];
+  for (const type of ['計算', '邏輯']) {
+    for (let i = 0; i < 5; i++) pool.push(makeTypedQuestion(type, `${type} 題 ${i}？`));
+  }
+  for (let i = 0; i < 20; i++) {
+    const picked = pickQuestions(pool, 3);
+    assert.equal(picked.length, 3);
+    assert.equal(new Set(picked.map((q) => q.type)).size, 2, '兩種題型都應出現');
+  }
+});
+
+test('pickQuestions 新舊優先序高於題型多樣性：同題型新題優先於異題型舊題', () => {
+  const pool = [
+    ...Array.from({ length: 3 }, (_, i) => makeTypedQuestion('計算', `新計算題 ${i}？`)),
+    ...['邏輯', '記憶', '常識'].map((t) => makeTypedQuestion(t, `舊${t}題？`)),
+  ];
+  const recent = new Set(pool.slice(3).map((q) => q.q));
+  for (let i = 0; i < 20; i++) {
+    const picked = pickQuestions(pool, 3, recent);
+    for (const q of picked) assert.ok(!recent.has(q.q), '必須先抽完新題才能動用近期出過的題');
+  }
+});
+
 test('shuffleOptions 打亂選項順序：正確答案不會永遠在第一個', () => {
   const qs = Array.from({ length: 30 }, (_, i) => makeQuestion(`題 ${i}？`));
   const out = shuffleOptions(qs);

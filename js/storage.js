@@ -43,8 +43,8 @@ export function saveHistory(hist) {
 }
 
 // ── 近期出題記錄：避免熟客連日遇到重複題目 ──────────────────────────────
-// 每個難度各自保留最近 21 題（約一週份量），抽題時優先排除。
-const RECENT_LIMIT = 21;
+// 每個難度各自保留最近 60 題（約 20 天份量），抽題時優先排除。
+const RECENT_LIMIT = 60;
 
 export function loadRecentQuestionTexts(diffKey) {
   const list = readJson(`recent:${diffKey}`);

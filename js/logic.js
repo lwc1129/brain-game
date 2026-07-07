@@ -52,15 +52,30 @@ export function shuffleOptions(questions) {
 
 // 從題池抽題，優先抽「近期沒出過」的題目（recentTexts 為近期題目文字集合），
 // 不夠時才回頭使用近期出過的題，保證一定抽得滿。選項順序一律打亂。
+// 同場加映題型多樣性：每一輪先從「本場尚未出過的題型」中隨機挑一型再抽題，
+// 題型用完才允許重複。優先序為 fresh-first 高於題型多樣性——跨日重複
+// 比單場出現同題型更傷體驗。
 export function pickQuestions(pool, count, recentTexts = new Set()) {
   const fresh = [];
   const seen = [];
   for (const q of pool) (recentTexts.has(q.q) ? seen : fresh).push(q);
   const out = [];
+  const usedTypes = new Set();
   for (const group of [fresh, seen]) {
-    const p = [...group];
-    while (out.length < count && p.length) {
-      out.push(p.splice(Math.floor(Math.random() * p.length), 1)[0]);
+    const byType = new Map();
+    for (const q of group) {
+      if (!byType.has(q.type)) byType.set(q.type, []);
+      byType.get(q.type).push(q);
+    }
+    while (out.length < count && byType.size) {
+      let types = [...byType.keys()].filter((t) => !usedTypes.has(t));
+      if (types.length === 0) types = [...byType.keys()];
+      const type = types[Math.floor(Math.random() * types.length)];
+      const candidates = byType.get(type);
+      const q = candidates.splice(Math.floor(Math.random() * candidates.length), 1)[0];
+      if (candidates.length === 0) byType.delete(type);
+      usedTypes.add(type);
+      out.push(q);
     }
   }
   return shuffleOptions(out);
