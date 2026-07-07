@@ -154,6 +154,10 @@ def validate_questions(data):
                 )
             if not all(isinstance(o, str) for o in opts):
                 raise ValueError(f"難度 {diff} 第 {idx} 題的 opts 必須全部為字串")
+            if len(set(opts)) != 4:
+                raise ValueError(
+                    f"難度 {diff} 第 {idx} 題的 opts 有重複選項，4 個選項必須互不相同"
+                )
             if q["a"] not in opts:
                 raise ValueError(
                     f"難度 {diff} 第 {idx} 題的正確答案 a 不在 opts 選項中"
@@ -206,6 +210,7 @@ def merge_question_banks(existing, new):
                 or not isinstance(q.get("a"), str) or not q["a"].strip()
                 or not isinstance(q.get("opts"), list) or len(q["opts"]) != 4
                 or not all(isinstance(o, str) for o in q["opts"])
+                or len(set(q["opts"])) != 4
                 or q["a"] not in q["opts"]
             ):
                 continue

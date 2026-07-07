@@ -115,6 +115,7 @@ export function isValidQuestions(qs) {
         Array.isArray(q.opts) &&
         q.opts.length === 4 &&
         q.opts.every((o) => typeof o === 'string') &&
+        new Set(q.opts).size === 4 &&
         q.opts.includes(q.a)
     )
   );

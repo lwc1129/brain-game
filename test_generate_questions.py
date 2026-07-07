@@ -100,6 +100,12 @@ class TestValidateQuestions(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_questions(data)
 
+    def test_duplicate_options_raise(self):
+        data = _make_valid_data()
+        data["hard"][0]["opts"] = ["A", "A", "C", "D"]
+        with self.assertRaises(ValueError):
+            validate_questions(data)
+
     def test_opts_not_list_raises(self):
         data = _make_valid_data()
         data["hard"][0]["opts"] = "not-a-list"
@@ -158,6 +164,15 @@ class TestMergeQuestionBanks(unittest.TestCase):
         self.assertEqual(merge_question_banks({}, new), new)
         merged = merge_question_banks({"hard": "not-a-list"}, new)
         self.assertEqual(merged, new)
+
+    def test_merge_skips_new_question_with_duplicate_options(self):
+        existing = self._bank(["舊題？"])
+        new = self._bank(["新題？"])
+        for diff in DIFFICULTIES:
+            new[diff][0]["opts"] = ["A", "A", "C", "D"]
+        merged = merge_question_banks(existing, new)
+        for diff in DIFFICULTIES:
+            self.assertEqual([q["q"] for q in merged[diff]], ["舊題？"])
 
     def test_merged_bank_passes_validation(self):
         merged = merge_question_banks(_make_valid_data(), self._bank(["另一題？"]))

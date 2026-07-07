@@ -195,6 +195,12 @@ test('isValidQuestions：合法 / 不合法題組', () => {
   assert.equal(isValidQuestions([makeQuestion(), makeQuestion(), bad]), false);
 });
 
+test('isValidQuestions：選項重複時不通過', () => {
+  const dup = makeQuestion();
+  dup.opts = ['2', '2', '3', '4'];
+  assert.equal(isValidQuestions([makeQuestion(), makeQuestion(), dup]), false);
+});
+
 // ── handler：CORS 與前置驗證 ───────────────────────────────────────────────
 test('handler：OPTIONS 預檢回 204', async () => {
   const req = makeReq({ method: 'OPTIONS', ip: freshIp() });

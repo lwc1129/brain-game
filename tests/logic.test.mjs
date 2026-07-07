@@ -216,6 +216,16 @@ test('isValidQuestions：AI 回傳題組驗證', () => {
   assert.equal(isValidQuestions([makeQuestion(), makeQuestion(), bad]), false);
 });
 
+test('isValidQuestions / isValidQuestionBank：選項重複時不通過', () => {
+  const dup = makeQuestion();
+  dup.opts = ['2', '2', '3', '4'];
+  assert.equal(isValidQuestions([makeQuestion(), makeQuestion(), dup]), false);
+
+  const bank = makeBank();
+  bank.easy[0] = { ...bank.easy[0], opts: ['2', '2', '3', '4'] };
+  assert.equal(isValidQuestionBank(bank), false);
+});
+
 // ── 日期 ─────────────────────────────────────────────────────────────────
 test('formatDateKey / yesterdayKey', () => {
   const d = new Date(2026, 5, 10); // 2026-06-10
