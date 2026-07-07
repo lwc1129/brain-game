@@ -91,10 +91,31 @@ const DIFF_DESC = {
   super_easy: '超簡單（適合老年人的非常簡單題目，不要有複雜運算）',
 };
 
-export function buildPrompt(diffKey) {
+// 題型白名單。任何進入 prompt 的題型字串都必須出自這份清單
+// （與 generate_questions.py 的 ALLOWED_TYPES 對齊）。
+export const QUESTION_TYPES = ['邏輯', '計算', '數列', '推理', '語言', '記憶', '常識'];
+
+// 隨機挑 3 種不同題型，讓每日 AI 題目不會固定落在同一類。
+// rand 參數可注入固定值以利測試。
+export function pickPromptTypes(rand = Math.random) {
+  const pool = [...QUESTION_TYPES];
+  const picked = [];
+  while (picked.length < QUESTIONS_PER_DAY && pool.length) {
+    picked.push(pool.splice(Math.floor(rand() * pool.length), 1)[0]);
+  }
+  return picked;
+}
+
+export function buildPrompt(diffKey, types = []) {
+  // 插值前先以白名單過濾：不合法的題型字串一律不得進入 prompt。
+  const safeTypes = types.filter((t) => QUESTION_TYPES.includes(t));
+  const typeLine =
+    safeTypes.length === QUESTIONS_PER_DAY
+      ? `請出${QUESTIONS_PER_DAY}題，題型分別為：${safeTypes.join('、')}。\n\n`
+      : `請出${QUESTIONS_PER_DAY}題，題型只能從以下選擇：${QUESTION_TYPES.join('、')}。\n\n`;
   return (
     `你是一位認知訓練出題專家，請為台灣的銀髮族長輩出${DIFF_DESC[diffKey]}的繁體中文腦力訓練題目。\n\n` +
-    `請出${QUESTIONS_PER_DAY}題，題型只能從以下選擇：邏輯、計算、數列、推理、語言、記憶、常識。\n\n` +
+    typeLine +
     '每題格式為JSON物件：\n' +
     '{"type":"題型","q":"題目文字","a":"正確答案","opts":["選項1","選項2","選項3","選項4"]}\n' +
     '正確答案必須包含在opts陣列中，選項順序隨機。\n\n' +
@@ -122,6 +143,17 @@ export function isValidQuestions(qs) {
 }
 
 async function callGemini(diffKey, apiKey) {
+  // 指定題型是 best-effort：模型偏離指定題型時不拒絕，
+  // 回應仍一律由 isValidQuestions 把關。
+  const types = pickPromptTypes();
+  console.log(
+    JSON.stringify({
+      level: 'info',
+      ts: new Date().toISOString(),
+      msg: 'Gemini call 嘗試',
+      ctx: { diffKey, types },
+    })
+  );
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent`,
     {
@@ -131,7 +163,7 @@ async function callGemini(diffKey, apiKey) {
         'x-goog-api-key': apiKey,
       },
       body: JSON.stringify({
-        contents: [{ parts: [{ text: buildPrompt(diffKey) }] }],
+        contents: [{ parts: [{ text: buildPrompt(diffKey, types) }] }],
         generationConfig: {
           temperature: 0.7,
           maxOutputTokens: 512,

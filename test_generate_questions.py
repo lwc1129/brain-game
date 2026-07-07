@@ -39,6 +39,40 @@ def _make_valid_data():
     return data
 
 
+class TestBuildPrompt(unittest.TestCase):
+    def test_no_args_backward_compatible(self):
+        from generate_questions import build_prompt
+
+        p = build_prompt()
+        self.assertIn("純 JSON", p)
+        self.assertNotIn("請優先產生數量最少的題型", p)
+
+    def test_ends_with_closing_instruction(self):
+        from generate_questions import build_prompt
+
+        for p in (build_prompt(), build_prompt({"hard": {"計算": 5}})):
+            self.assertEqual(
+                p.strip().splitlines()[-1],
+                "只回傳純JSON物件，不要有任何其他文字或markdown。",
+            )
+
+    def test_type_counts_names_rarest_types(self):
+        from generate_questions import ALLOWED_TYPES, build_prompt
+
+        counts = {"hard": {t: 50 for t in ALLOWED_TYPES}}
+        counts["hard"]["常識"] = 1
+        counts["hard"]["邏輯"] = 2
+        counts["hard"]["推理"] = 3
+        p = build_prompt(counts)
+        self.assertIn("請優先產生數量最少的題型：常識、邏輯、推理", p)
+
+    def test_unknown_type_keys_not_interpolated(self):
+        from generate_questions import build_prompt
+
+        p = build_prompt({"hard": {"惡意注入題型": 1}})
+        self.assertNotIn("惡意注入題型", p)
+
+
 class TestParseResponseText(unittest.TestCase):
     def test_plain_json_object(self):
         data = parse_response_text('{"hard": []}')

@@ -54,8 +54,14 @@ OUTPUT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "question
 MODEL_NAME = "gemini-2.5-flash"
 
 
-def build_prompt():
-    """組出要求 Gemini 回傳嚴格 JSON 題庫的 prompt。"""
+def build_prompt(type_counts=None):
+    """組出要求 Gemini 回傳嚴格 JSON 題庫的 prompt。
+
+    type_counts 為 compute_type_counts 的輸出（{difficulty: {type: count}}），
+    提供時會在 prompt 中點名目前數量最少的題型，引導模型補足缺口。
+    只有 ALLOWED_TYPES 白名單內的題型會被插值進 prompt，
+    題庫中出現的其他字串一律不進入 prompt。
+    """
     schema_example = {
         "hard": [
             {
@@ -69,11 +75,28 @@ def build_prompt():
         "easy": [],
         "super_easy": [],
     }
+
+    priority_part = ""
+    if type_counts:
+        totals = {}
+        for diff in DIFFICULTIES:
+            per_type = type_counts.get(diff) or {}
+            for qtype, n in per_type.items():
+                if qtype in ALLOWED_TYPES and isinstance(n, int):
+                    totals[qtype] = totals.get(qtype, 0) + n
+        counts_text = "、".join(f"{t} {totals.get(t, 0)} 題" for t in ALLOWED_TYPES)
+        rarest = sorted(ALLOWED_TYPES, key=lambda t: totals.get(t, 0))[:3]
+        priority_part = (
+            f"目前題庫各題型題數：{counts_text}。\n"
+            f"請優先產生數量最少的題型：{'、'.join(rarest)}。\n\n"
+        )
+
     return (
         "你是一位繁體中文的認知訓練題庫設計師，服務對象為銀髮族。\n"
-        "請產生一份適合每日腦力挑戰的題庫，主題可包含：計算、邏輯、數列、"
-        "推理、語言、記憶、常識。\n\n"
-        "嚴格要求（務必遵守）：\n"
+        "請產生一份適合每日腦力挑戰的題庫，主題可包含："
+        f"{'、'.join(ALLOWED_TYPES)}。\n\n"
+        + priority_part
+        + "嚴格要求（務必遵守）：\n"
         f"1. 回傳「純 JSON」，不要有任何說明文字或 markdown 標記。\n"
         f"2. 最外層為物件，必須包含這四個 key：{', '.join(DIFFICULTIES)}。\n"
         "   - hard：困難；medium：中等；easy：簡單；super_easy：超簡單。\n"
@@ -82,11 +105,12 @@ def build_prompt():
         "   - type：題目類型（字串，如「計算」「邏輯」「常識」）\n"
         "   - q：題目敘述（字串，繁體中文，結尾用全形問號）\n"
         "   - a：正確答案（字串）\n"
-        "   - opts：4 個選項的陣列（字串陣列），且 a 必須是 opts 其中之一\n"
+        "   - opts：4 個選項的陣列（字串陣列），互不相同，且 a 必須是 opts 其中之一\n"
         "5. 難度需明顯區隔：super_easy 給認知退化者，hard 需要較多思考。\n"
         "6. 全部使用繁體中文。\n\n"
         "回傳格式範例（僅示意結構，內容請自行產生）：\n"
         + json.dumps(schema_example, ensure_ascii=False, indent=2)
+        + "\n\n只回傳純JSON物件，不要有任何其他文字或markdown。"
     )
 
 
@@ -287,7 +311,7 @@ def merge_question_banks(existing, new):
     return merged
 
 
-def call_gemini(api_key):
+def call_gemini(api_key, type_counts=None):
     """呼叫 Gemini API，回傳文字內容。
 
     依規格使用回傳路徑 response.candidates[0].content.parts[0].text。
@@ -297,7 +321,7 @@ def call_gemini(api_key):
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel(MODEL_NAME)
     response = model.generate_content(
-        build_prompt(),
+        build_prompt(type_counts),
         generation_config={"response_mime_type": "application/json"},
     )
 
@@ -314,10 +338,11 @@ def main():
         sys.exit(1)
 
     try:
-        raw_text = call_gemini(api_key)
+        existing = load_existing_bank(OUTPUT_PATH)
+        raw_text = call_gemini(api_key, compute_type_counts(existing))
         new_data = parse_response_text(raw_text)
         validate_questions(new_data)
-        merged = merge_question_banks(load_existing_bank(OUTPUT_PATH), new_data)
+        merged = merge_question_banks(existing, new_data)
         validate_questions(merged)
     except Exception as exc:  # noqa: BLE001 - 任何失敗都需明確中止
         print(f"題庫產生失敗，不更新 questions.json：{exc}", file=sys.stderr)
