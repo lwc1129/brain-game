@@ -274,5 +274,72 @@ class TestMergeQuestionBanks(unittest.TestCase):
         self.assertTrue(validate_questions(merged))
 
 
+class TestRebalance(unittest.TestCase):
+    def test_apply_type_cap_keeps_oldest_within_cap(self):
+        from rebalance_questions import apply_type_cap
+
+        qs = [_make_question(text=f"計算 {i}？") for i in range(5)]
+        other = _make_question(text="邏輯題？")
+        other["type"] = "邏輯"
+        qs.append(other)
+        capped = apply_type_cap(qs, cap=3)
+        self.assertEqual(
+            [q["q"] for q in capped], ["計算 0？", "計算 1？", "計算 2？", "邏輯題？"]
+        )
+
+    def test_refill_fills_rarest_type_first(self):
+        from rebalance_questions import refill
+
+        existing = [_make_question(text=f"計算 {i}？") for i in range(3)]
+        logic = _make_question(text="邏輯候選？")
+        logic["type"] = "邏輯"
+        calc = _make_question(text="計算候選？")
+        candidates = [calc, logic]
+        out = refill(existing, candidates, 4, set())
+        self.assertEqual(out[-1]["q"], "邏輯候選？", "數量最少的題型應優先補")
+
+    def test_refill_skips_candidates_already_seen(self):
+        from rebalance_questions import refill
+
+        candidate = _make_question(text="重複候選？")
+        seen = {"重複候選?"}  # normalize 後全形問號折疊為半形
+        out = refill([], [candidate], 1, seen)
+        self.assertEqual(out, [], "已出現過的候選題不可再補入")
+
+    def test_refill_respects_type_cap(self):
+        from rebalance_questions import refill
+
+        existing = [_make_question(text=f"計算 {i}？") for i in range(3)]
+        candidates = [_make_question(text="計算候選？")]
+        out = refill(existing, candidates, 4, set(), cap=3)
+        self.assertEqual(len(out), 3, "候選題型已達上限時不可補入")
+
+    def test_cross_difficulty_dedup_keeps_first_difficulty(self):
+        from rebalance_questions import apply_cross_difficulty_dedup
+
+        bank = {diff: [_make_question(text=f"{diff} 題？")] for diff in DIFFICULTIES}
+        bank["hard"].append(_make_question(text="重複題？"))
+        bank["easy"].append(_make_question(text="重複題？"))
+        deduped, seen = apply_cross_difficulty_dedup(bank)
+        self.assertIn("重複題？", [q["q"] for q in deduped["hard"]])
+        self.assertNotIn("重複題？", [q["q"] for q in deduped["easy"]])
+        self.assertIn(normalize_question_text("重複題？"), seen)
+
+    def test_extra_generators_deterministic(self):
+        import random
+
+        import seed_questions
+
+        try:
+            seed_questions.set_rng(random.Random(1))
+            first = seed_questions.gen_extra_hard()
+            seed_questions.set_rng(random.Random(1))
+            second = seed_questions.gen_extra_hard()
+            self.assertEqual(first, second)
+            self.assertTrue(first, "產生器不可回傳空清單")
+        finally:
+            seed_questions.set_rng(random.Random(20260612))
+
+
 if __name__ == "__main__":
     unittest.main()
