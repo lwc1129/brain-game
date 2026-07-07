@@ -23,9 +23,16 @@ QB schema（與 index.html 內現有 QB 物件完全一致）：
 import json
 import os
 import sys
+import unicodedata
 
 # QB schema 的四個難度層級，順序與 index.html 一致。
+# merge_question_banks 依此順序做跨難度去重：同一題文出現在多個難度時，
+# 保留在「較難」的那一個（排在前面者優先）。
 DIFFICULTIES = ["hard", "medium", "easy", "super_easy"]
+
+# 題庫允許的題型白名單。插入 prompt 前必須先比對此清單（見 build_prompt），
+# 與 api/questions.js 的 QUESTION_TYPES 對齊。
+ALLOWED_TYPES = ["計算", "邏輯", "數列", "推理", "語言", "記憶", "常識"]
 
 # 每個難度的最低題目數。對齊前端 js/logic.js 的 pickQuestions()：
 # 每次抽 3 題，故每個難度至少需 3 題才能保證遊戲正常運作。
@@ -33,6 +40,11 @@ MIN_PER_DIFFICULTY = 3
 
 # 合併後每個難度的題數上限，超過時淘汰最舊的題目。
 MAX_PER_DIFFICULTY = 300
+
+# 單一題型在單一難度中的題數上限（佔比 35%），避免題庫被單一題型
+# （歷史上是「計算」）淹沒。merge_question_banks 只用它擋「新」題，
+# 既有題目永遠不會因配額被剔除。
+TYPE_CAP = int(MAX_PER_DIFFICULTY * 0.35)
 
 # 每題必要欄位。
 REQUIRED_QUESTION_FIELDS = ["type", "q", "a", "opts"]
@@ -166,9 +178,50 @@ def validate_questions(data):
     return True
 
 
+# NFKC 折疊後仍殘留的 CJK 標點 → ASCII 對映。NFKC 已處理全形英數與
+# ？＝！～（）：；，等 fullwidth forms；這裡補上頓號、句號、引號、破折號等
+# 不屬於 fullwidth forms 的標點，讓標點變體改寫的同一題能互相碰撞。
+_PUNCT_TRANS = str.maketrans({
+    "、": ",",
+    "。": ".",
+    "「": '"',
+    "」": '"',
+    "『": '"',
+    "』": '"',
+    "−": "-",
+    "–": "-",
+    "—": "-",
+    "‧": ".",
+    "・": ".",
+})
+
+
 def normalize_question_text(text):
-    """去除空白後的題目文字，作為去重 key。"""
-    return "".join(str(text).split())
+    """題目文字的去重 key：去空白 → NFKC 折疊全半形 → 統一 CJK 標點。
+
+    讓「1＋1＝？」與「1+1=?」、「甲、乙」與「甲，乙」視為同一題。
+    """
+    collapsed = "".join(str(text).split())
+    folded = unicodedata.normalize("NFKC", collapsed)
+    return folded.translate(_PUNCT_TRANS)
+
+
+def compute_type_counts(bank):
+    """統計題庫各難度、各題型的題數：{difficulty: {type: count}}。
+
+    容忍缺難度、非 list、非 dict 題目等髒資料（一律略過），
+    供 merge 配額判斷、rebalance 與 build_prompt 共用。
+    """
+    counts = {}
+    for diff in DIFFICULTIES:
+        qs = bank.get(diff) if isinstance(bank.get(diff), list) else []
+        per_type = {}
+        for q in qs:
+            qtype = q.get("type") if isinstance(q, dict) else None
+            if isinstance(qtype, str) and qtype.strip():
+                per_type[qtype] = per_type.get(qtype, 0) + 1
+        counts[diff] = per_type
+    return counts
 
 
 def load_existing_bank(path):
@@ -185,39 +238,50 @@ def load_existing_bank(path):
     return data
 
 
+def _is_mergeable_question(q):
+    """merge 用的單題健全性檢查（與 validate_questions 的單題規則一致）。"""
+    return (
+        isinstance(q, dict)
+        and all(field in q for field in REQUIRED_QUESTION_FIELDS)
+        and isinstance(q.get("type"), str) and q["type"].strip()
+        and isinstance(q.get("q"), str) and q["q"].strip()
+        and isinstance(q.get("a"), str) and q["a"].strip()
+        and isinstance(q.get("opts"), list) and len(q["opts"]) == 4
+        and all(isinstance(o, str) for o in q["opts"])
+        and len(set(q["opts"])) == 4
+        and q["a"] in q["opts"]
+    )
+
+
 def merge_question_banks(existing, new):
     """合併既有題庫與新題庫。
 
     規則：
-    - 以去除空白後的題目文字（q）去重，既有題目優先保留。
-    - 新題附加在既有題目之後。
+    - 以 normalize_question_text(q) 為 key「跨難度」去重：同一題文只保留
+      在較難的難度（依 DIFFICULTIES 順序，先處理者優先）；同難度內
+      既有題目優先保留。
+    - 新題附加在既有題目之後；新題的題型在該難度已達 TYPE_CAP 時跳過
+      （既有題目不受配額影響）。
     - 每難度超過 MAX_PER_DIFFICULTY 時，淘汰最舊（最前面）的題目。
     """
     merged = {}
+    seen = set()  # 跨難度共用的去重集合
     for diff in DIFFICULTIES:
         old_qs = existing.get(diff) if isinstance(existing.get(diff), list) else []
-        new_qs = new.get(diff, [])
-        seen = set()
+        new_qs = new.get(diff) if isinstance(new.get(diff), list) else []
         combined = []
-        for q in list(old_qs) + list(new_qs):
-            if not isinstance(q, dict):
+        type_counts = {}
+        for q, is_new in [(q, False) for q in old_qs] + [(q, True) for q in new_qs]:
+            if not _is_mergeable_question(q):
                 continue
-            if any(field not in q for field in REQUIRED_QUESTION_FIELDS):
-                continue
-            if (
-                not isinstance(q.get("type"), str) or not q["type"].strip()
-                or not isinstance(q.get("q"), str) or not q["q"].strip()
-                or not isinstance(q.get("a"), str) or not q["a"].strip()
-                or not isinstance(q.get("opts"), list) or len(q["opts"]) != 4
-                or not all(isinstance(o, str) for o in q["opts"])
-                or len(set(q["opts"])) != 4
-                or q["a"] not in q["opts"]
-            ):
-                continue
-            key = normalize_question_text(q.get("q", ""))
+            key = normalize_question_text(q["q"])
             if not key or key in seen:
                 continue
+            qtype = q["type"]
+            if is_new and type_counts.get(qtype, 0) >= TYPE_CAP:
+                continue
             seen.add(key)
+            type_counts[qtype] = type_counts.get(qtype, 0) + 1
             combined.append(q)
         merged[diff] = combined[-MAX_PER_DIFFICULTY:]
     return merged
