@@ -364,6 +364,7 @@ class TestRebalance(unittest.TestCase):
 
         import seed_questions
 
+        original_rng = seed_questions.rng
         try:
             seed_questions.set_rng(random.Random(1))
             first = seed_questions.gen_extra_hard()
@@ -372,7 +373,7 @@ class TestRebalance(unittest.TestCase):
             self.assertEqual(first, second)
             self.assertTrue(first, "產生器不可回傳空清單")
         finally:
-            seed_questions.set_rng(random.Random(20260612))
+            seed_questions.set_rng(original_rng)
 
 
 if __name__ == "__main__":

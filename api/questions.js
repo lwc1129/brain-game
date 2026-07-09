@@ -173,24 +173,64 @@ async function callGemini(diffKey, apiKey) {
     }
   );
   if (!res.ok) {
-    console.error(`Gemini API error: ${res.status} ${res.statusText}`);
+    console.error(
+      JSON.stringify({
+        level: 'error',
+        ts: new Date().toISOString(),
+        msg: 'Gemini 回應非 2xx',
+        ctx: { status: res.status, statusText: res.statusText, diffKey },
+      })
+    );
     return null;
   }
   const data = await res.json();
   const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+  const logParseError = () =>
+    console.error(
+      JSON.stringify({
+        level: 'error',
+        ts: new Date().toISOString(),
+        msg: 'Gemini 回應 JSON 解析失敗',
+        ctx: { diffKey, rawLength: raw.length },
+      })
+    );
   let qs;
   try {
     qs = JSON.parse(raw);
   } catch {
     const m = raw.match(/\[[\s\S]*\]/);
-    if (!m) return null;
+    if (!m) {
+      logParseError();
+      return null;
+    }
     try {
       qs = JSON.parse(m[0]);
     } catch {
+      logParseError();
       return null;
     }
   }
-  return isValidQuestions(qs) ? qs.slice(0, QUESTIONS_PER_DAY) : null;
+  if (!isValidQuestions(qs)) {
+    console.error(
+      JSON.stringify({
+        level: 'error',
+        ts: new Date().toISOString(),
+        msg: 'isValidQuestions 驗證失敗',
+        ctx: { diffKey, count: Array.isArray(qs) ? qs.length : 0 },
+      })
+    );
+    return null;
+  }
+  const questions = qs.slice(0, QUESTIONS_PER_DAY);
+  console.log(
+    JSON.stringify({
+      level: 'info',
+      ts: new Date().toISOString(),
+      msg: 'Gemini 出題成功',
+      ctx: { diffKey, count: questions.length },
+    })
+  );
+  return questions;
 }
 
 export default async function handler(req, res) {
