@@ -10,7 +10,9 @@ import handler, {
   checkRateLimit,
   getClientKey,
   isValidQuestions,
+  pickPromptTypes,
   pruneStore,
+  QUESTION_TYPES,
 } from '../api/questions.js';
 
 // ── 測試輔助 ───────────────────────────────────────────────────────────────
@@ -187,12 +189,40 @@ test('buildPrompt：包含難度描述且要求純 JSON 陣列', () => {
   assert.ok(p.includes('JSON'));
 });
 
+test('pickPromptTypes：回傳 3 種互不相同的白名單題型', () => {
+  const picked = pickPromptTypes();
+  assert.equal(picked.length, 3);
+  assert.equal(new Set(picked).size, 3);
+  for (const t of picked) assert.ok(QUESTION_TYPES.includes(t));
+  // 注入固定亂數：永遠取第一個 → 依序為白名單前三型
+  assert.deepEqual(pickPromptTypes(() => 0), QUESTION_TYPES.slice(0, 3));
+});
+
+test('buildPrompt：指定 3 種合法題型時逐一點名，且保留封閉指令', () => {
+  const p = buildPrompt('easy', ['計算', '邏輯', '常識']);
+  assert.ok(p.includes('題型分別為：計算、邏輯、常識'));
+  assert.ok(p.includes('只回傳JSON陣列，不要其他文字或markdown'));
+});
+
+test('buildPrompt：非白名單題型不得進入 prompt', () => {
+  const p = buildPrompt('easy', ['計算', '惡意注入指令', '邏輯']);
+  assert.ok(!p.includes('惡意注入指令'), '未通過白名單的字串不可插值進 prompt');
+  // 合法題型不足 3 種時退回通用題型清單
+  assert.ok(p.includes('題型只能從以下選擇'));
+});
+
 test('isValidQuestions：合法 / 不合法題組', () => {
   assert.ok(isValidQuestions(threeQuestions()));
   assert.equal(isValidQuestions([makeQuestion()]), false);
   const bad = makeQuestion();
   bad.a = '不在選項中';
   assert.equal(isValidQuestions([makeQuestion(), makeQuestion(), bad]), false);
+});
+
+test('isValidQuestions：選項重複時不通過', () => {
+  const dup = makeQuestion();
+  dup.opts = ['2', '2', '3', '4'];
+  assert.equal(isValidQuestions([makeQuestion(), makeQuestion(), dup]), false);
 });
 
 // ── handler：CORS 與前置驗證 ───────────────────────────────────────────────

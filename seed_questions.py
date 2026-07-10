@@ -29,6 +29,13 @@ TARGET_PER_DIFFICULTY = 300
 # 固定種子讓結果可重現。
 rng = random.Random(20260612)
 
+
+def set_rng(r):
+    """讓 rebalance_questions.py 等外部腳本注入自己的亂數來源，
+    使各腳本的產出各自可重現、互不干擾。"""
+    global rng
+    rng = r
+
 WEEKDAYS = ["一", "二", "三", "四", "五", "六", "日"]
 CN_POS = ["一", "二", "三", "四", "五", "六", "七"]
 
@@ -491,6 +498,173 @@ def gen_hard():
     ]
     out += memory_questions(MEM_POOLS, 7, 25)
     out += pick_curated("常識", HARD_FACTS)
+    return out
+
+
+# ── rebalance 補題用資料與產生器（見 rebalance_questions.py）──────────────
+# 目的：補足題庫中數量最少的題型（邏輯、推理、常識、語言、數列），
+# 讓單一題型不超過 generate_questions.TYPE_CAP 的佔比上限。
+
+# 歸類題的類別詞庫。兩組難度各自獨立，避免跨難度產生相同題文。
+CATEGORY_POOLS_BASIC = [
+    ("水果", ["蘋果", "香蕉", "橘子", "葡萄", "西瓜", "鳳梨", "芒果", "草莓"]),
+    ("動物", ["狗", "貓", "牛", "羊", "馬", "雞", "兔子", "豬"]),
+    ("交通工具", ["汽車", "公車", "火車", "腳踏車", "捷運", "飛機", "船"]),
+    ("身體部位", ["眼睛", "鼻子", "耳朵", "嘴巴", "手", "腳", "肩膀"]),
+    ("衣物", ["外套", "襯衫", "褲子", "裙子", "帽子", "襪子", "手套"]),
+    ("顏色", ["紅色", "藍色", "黃色", "綠色", "紫色", "黑色", "白色"]),
+]
+
+CATEGORY_POOLS_HARDER = [
+    ("蔬菜", ["高麗菜", "菠菜", "紅蘿蔔", "白蘿蔔", "青椒", "茄子", "南瓜"]),
+    ("家電", ["電視", "冰箱", "洗衣機", "電風扇", "冷氣", "電鍋", "吹風機"]),
+    ("文具", ["鉛筆", "橡皮擦", "直尺", "剪刀", "筆記本", "膠水", "訂書機"]),
+    ("職業", ["醫生", "老師", "警察", "廚師", "司機", "護理師", "農夫"]),
+    ("樂器", ["鋼琴", "吉他", "小提琴", "笛子", "二胡", "喇叭", "鼓"]),
+    ("廚房用品", ["菜刀", "砧板", "湯鍋", "平底鍋", "鍋鏟", "湯勺", "碗盤"]),
+]
+
+# 相反詞第二批（easy 語言補題；與 OPPOSITE_WORDS 不重複）。
+OPPOSITE_WORDS_2 = [
+    ("增加", "減少"), ("出發", "抵達"), ("升高", "降低"), ("向前", "向後"),
+    ("白天", "黑夜"), ("上升", "下降"), ("擁擠", "空曠"), ("複雜", "簡單"),
+    ("熱情", "冷淡"), ("大方", "小氣"), ("樂觀", "悲觀"), ("謙虛", "驕傲"),
+    ("溫柔", "粗魯"), ("充足", "缺乏"), ("熟悉", "陌生"), ("流行", "過時"),
+    ("集合", "解散"), ("贊成", "反對"),
+]
+
+# hard 常識第二批（與 HARD_FACTS 不重複）。
+HARD_FACTS_2 = [
+    ("「花甲之年」是指幾歲？", "60歲", ["50歲", "70歲", "80歲"]),
+    ("「知天命」是指幾歲？", "50歲", ["40歲", "60歲", "70歲"]),
+    ("一世紀是幾年？", "100年", ["50年", "10年", "1000年"]),
+    ("「一旬」是指幾天？", "10天", ["7天", "15天", "30天"]),
+    ("「一炷香」的時間大約是多久？", "30分鐘", ["5分鐘", "2小時", "半天"]),
+    ("十二生肖排第一的是？", "鼠", ["牛", "虎", "豬"]),
+    ("十二生肖排最後的是？", "豬", ["狗", "雞", "猴"]),
+    ("農曆十二月又稱為什麼月？", "臘月", ["正月", "荷月", "桂月"]),
+    ("端午節划龍舟是為了紀念誰？", "屈原", ["孔子", "關公", "岳飛"]),
+    ("世界上最大的海洋是？", "太平洋", ["大西洋", "印度洋", "北冰洋"]),
+    ("台灣最高的山是？", "玉山", ["阿里山", "雪山", "合歡山"]),
+    ("「白露」與「霜降」屬於什麼？", "二十四節氣", ["國定假日", "傳統戲曲", "十二生肖"]),
+    ("水在高山上的沸點會怎麼樣？", "變低", ["變高", "不變", "變成兩倍"]),
+    ("一公噸是幾公斤？", "1000公斤", ["100公斤", "500公斤", "10000公斤"]),
+    ("「三伏天」指的是什麼時候？", "一年最熱的時候", ["一年最冷的時候", "梅雨季節", "颱風季節"]),
+    ("「數九寒天」指的是什麼時候？", "一年最冷的時候", ["一年最熱的時候", "春暖花開時", "中秋前後"]),
+    ("圍棋主要用哪兩種顏色的棋子？", "黑與白", ["紅與黑", "紅與綠", "黃與藍"]),
+    ("「朝霞不出門，晚霞行千里」是關於什麼的諺語？", "天氣", ["飲食", "農耕", "健康"]),
+    ("國道高速公路一般最高速限是時速幾公里？", "110公里", ["90公里", "130公里", "150公里"]),
+    ("奧運會每幾年舉辦一次？", "4年", ["2年", "3年", "5年"]),
+]
+
+# hard 語言第二批：成語近義題（與 IDIOM_SYNONYMS 不重複）。
+HARD_IDIOMS_2 = [
+    ("畫蛇添足", "多此一舉", ["恰到好處", "畫龍點睛", "一氣呵成"]),
+    ("杯弓蛇影", "疑神疑鬼", ["泰然自若", "心安理得", "處變不驚"]),
+    ("破釜沉舟", "背水一戰", ["猶豫不決", "畏首畏尾", "進退兩難"]),
+    ("囫圇吞棗", "不求甚解", ["融會貫通", "舉一反三", "精益求精"]),
+    ("投鼠忌器", "有所顧忌", ["肆無忌憚", "為所欲為", "毫無顧忌"]),
+    ("東山再起", "捲土重來", ["一蹶不振", "銷聲匿跡", "急流勇退"]),
+    ("如虎添翼", "錦上添花", ["雪上加霜", "每況愈下", "趁火打劫"]),
+    ("循序漸進", "按部就班", ["一步登天", "揠苗助長", "急於求成"]),
+    ("車水馬龍", "川流不息", ["門可羅雀", "杳無人煙", "冷冷清清"]),
+    ("袖手旁觀", "置身事外", ["挺身而出", "當仁不讓", "見義勇為"]),
+]
+
+SEASONS_NEXT = [
+    ("春天過後是什麼季節？", "夏天", ["秋天", "冬天", "春天"]),
+    ("夏天過後是什麼季節？", "秋天", ["春天", "冬天", "夏天"]),
+    ("秋天過後是什麼季節？", "冬天", ["夏天", "春天", "秋天"]),
+    ("冬天過後是什麼季節？", "春天", ["夏天", "秋天", "冬天"]),
+]
+
+
+def month_distractors(ans_month):
+    pool = [m for m in range(1, 13) if m != ans_month]
+    return [f"{m}月" for m in rng.sample(pool, 3)]
+
+
+def odd_one_out_questions(pools, count):
+    """歸類邏輯題：三個同類 + 一個異類，問哪一個不屬於該類。"""
+    out = []
+    seen = set()
+    attempts = 0
+    while len(out) < count and attempts < count * 30:
+        attempts += 1
+        (cat, members), (_ocat, omembers) = rng.sample(pools, 2)
+        picks = rng.sample(members, 3)
+        outsider = rng.choice(omembers)
+        key = frozenset(picks + [outsider, cat])
+        if key in seen:
+            continue
+        seen.add(key)
+        items = picks + [outsider]
+        rng.shuffle(items)
+        text = f"{'、'.join(items)}，哪一個不是{cat}？"
+        out.append(make_q("邏輯", text, outsider, picks))
+    return out
+
+
+def gen_extra_super_easy():
+    """super_easy 補題候選：歸類邏輯 + 單步時序推理。"""
+    out = []
+    out += odd_one_out_questions(CATEGORY_POOLS_BASIC, 45)
+    for w in range(7):
+        out.append(weekday_q("推理", f"今天星期{WEEKDAYS[w]}，明天是星期幾？", w + 1))
+        out.append(weekday_q("推理", f"今天星期{WEEKDAYS[w]}，昨天是星期幾？", w + 6))
+    for m in range(1, 13):
+        nxt = m % 12 + 1
+        prv = (m - 2) % 12 + 1
+        out.append(make_q("推理", f"{m}月的下一個月是幾月？", f"{nxt}月", month_distractors(nxt)))
+        out.append(make_q("推理", f"{m}月的上一個月是幾月？", f"{prv}月", month_distractors(prv)))
+    return out
+
+
+def gen_extra_easy():
+    """easy 補題候選：歸類邏輯 + 短跨距星期推理 + 季節推理 + 相反詞。"""
+    out = []
+    out += odd_one_out_questions(CATEGORY_POOLS_HARDER, 45)
+    for w in range(7):
+        for n in (2, 3, 4, 5):
+            out.append(weekday_q("推理", f"今天星期{WEEKDAYS[w]}，{n}天後是星期幾？", w + n))
+        out.append(weekday_q("推理", f"昨天是星期{WEEKDAYS[w]}，今天是星期幾？", w + 1))
+        out.append(weekday_q("推理", f"今天星期{WEEKDAYS[w]}，前天是星期幾？", w + 5))
+    out += pick_curated("推理", SEASONS_NEXT)
+    out += opposite_questions(OPPOSITE_WORDS_2, word=True)
+    return out
+
+
+def gen_extra_medium():
+    """medium 補題候選：三人遞移比較邏輯（與 hard 的四人版題文不同）。"""
+    out = []
+    for names in LOGIC_NAMES:
+        n1, n2, n3 = names
+        for rel, q_min, q_max in TRANSITIVE:
+            chain = f"{n1}{rel.format(n2)}，{n2}{rel.format(n3)}"
+            out.append(make_q("邏輯", f"{chain}，{q_min}", n3, [n1, n2, "無法判斷"]))
+            out.append(make_q("邏輯", f"{chain}，{q_max}", n1, [n2, n3, "無法判斷"]))
+    return out
+
+
+def gen_extra_hard():
+    """hard 補題候選：常識第二批 + 成語近義 + 新型數列。"""
+    out = []
+    out += pick_curated("常識", HARD_FACTS_2)
+    out += [
+        make_q("語言", f"「{idiom}」最接近哪個成語？", a, ds)
+        for idiom, a, ds in HARD_IDIOMS_2
+    ]
+    for s in range(2, 7):  # 乘2加1數列
+        seq = [s]
+        for _ in range(4):
+            seq.append(seq[-1] * 2 + 1)
+        out.append(make_q("數列", "、".join(map(str, seq[:4])) + "、？", seq[4], num_distractors(seq[4], low=1)))
+    for s in (11, 15, 19, 23, 27):  # 交錯數列：+a、−b 交替
+        for a, b in ((5, 2), (7, 3), (9, 4)):
+            seq = [s]
+            for i in range(4):
+                seq.append(seq[-1] + (a if i % 2 == 0 else -b))
+            out.append(make_q("數列", "、".join(map(str, seq[:4])) + "、？", seq[4], num_distractors(seq[4], low=0)))
     return out
 
 
