@@ -2,6 +2,7 @@
 // 前端只送出難度，金鑰由 proxy 端保管，絕不出現在瀏覽器。
 import { CONFIG } from './config.js';
 import { isValidQuestions, QUESTIONS_PER_DAY } from './logic.js';
+import { logError } from './logger.js';
 import { readAiCache, writeAiCache } from './storage.js';
 
 const FETCH_TIMEOUT_MS = 8000;
@@ -25,14 +26,21 @@ async function fetchFromProxy(today, diffKey) {
       signal: ctrl.signal,
       body: JSON.stringify({ difficulty: diffKey }),
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      logError('fetchFromProxy', new Error(`HTTP ${res.status}`));
+      return null;
+    }
     const data = await res.json();
     const qs = data?.questions;
-    if (!isValidQuestions(qs)) return null;
+    if (!isValidQuestions(qs)) {
+      logError('fetchFromProxy', new Error('invalid questions response'));
+      return null;
+    }
     const out = qs.slice(0, QUESTIONS_PER_DAY);
     writeAiCache(today, diffKey, out);
     return out;
-  } catch {
+  } catch (e) {
+    logError('fetchFromProxy', e);
     return null;
   } finally {
     clearTimeout(t);

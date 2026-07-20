@@ -263,6 +263,62 @@ test('handler：CORS 來源不在白名單時回 403 且不設 CORS header', asy
   assert.equal(res.headers['access-control-allow-origin'], undefined);
 });
 
+test('handler：origin 被拒絕時記錄結構化 warn log', async () => {
+  const logs = [];
+  const orig = console.warn;
+  console.warn = (msg) => logs.push(msg);
+  try {
+    const req = makeReq({ method: 'POST', origin: 'https://evil.example', ip: freshIp() });
+    const res = makeRes();
+    await handler(req, res);
+    assert.equal(res.statusCode, 403);
+    assert.equal(logs.length, 1);
+    const entry = JSON.parse(logs[0]);
+    assert.equal(entry.level, 'warn');
+    assert.equal(entry.ctx.origin, 'https://evil.example');
+    assert.equal(entry.msg, 'origin not allowed');
+  } finally {
+    console.warn = orig;
+  }
+});
+
+test('handler：rate limit 觸發時記錄結構化 warn log', async () => {
+  const prev = process.env.GEMINI_API_KEY;
+  const prevMax = process.env.RATE_LIMIT_MAX;
+  process.env.GEMINI_API_KEY = 'test-key';
+  process.env.RATE_LIMIT_MAX = '1';
+  const restore = stubFetch(geminiOk(threeQuestions()));
+  const ip = freshIp();
+  const logs = [];
+  const orig = console.warn;
+  console.warn = (msg) => logs.push(msg);
+  try {
+    await handler(makeReq({ ip }), makeRes());
+    const blocked = makeRes();
+    await handler(makeReq({ ip }), blocked);
+    assert.equal(blocked.statusCode, 429);
+    const rlLog = logs.find((m) => {
+      try {
+        return JSON.parse(m).msg === 'rate limit exceeded';
+      } catch {
+        return false;
+      }
+    });
+    assert.ok(rlLog, '應有 rate limit warn log');
+    const entry = JSON.parse(rlLog);
+    assert.equal(entry.level, 'warn');
+    assert.equal(entry.ctx.clientKey, ip);
+    assert.equal(entry.ctx.remaining, 0);
+  } finally {
+    restore();
+    console.warn = orig;
+    if (prev !== undefined) process.env.GEMINI_API_KEY = prev;
+    else delete process.env.GEMINI_API_KEY;
+    if (prevMax !== undefined) process.env.RATE_LIMIT_MAX = prevMax;
+    else delete process.env.RATE_LIMIT_MAX;
+  }
+});
+
 // ── handler：金鑰與 Gemini 呼叫 ─────────────────────────────────────────────
 test('handler：未設定 GEMINI_API_KEY 回 503', async () => {
   const prev = process.env.GEMINI_API_KEY;
@@ -362,5 +418,96 @@ test('handler：限流在呼叫 Gemini 前生效（429 不應觸發 fetch）', a
     else delete process.env.GEMINI_API_KEY;
     if (prevMax !== undefined) process.env.RATE_LIMIT_MAX = prevMax;
     else delete process.env.RATE_LIMIT_MAX;
+  }
+});
+
+// ── handler：difficulty 與 origin 邊界 ─────────────────────────────────────
+for (const diff of ['hard', 'medium', 'easy', 'super_easy']) {
+  test(`handler：合法 difficulty「${diff}」回 200`, async () => {
+    const prev = process.env.GEMINI_API_KEY;
+    process.env.GEMINI_API_KEY = 'test-key';
+    const restore = stubFetch(geminiOk(threeQuestions()));
+    try {
+      const res = makeRes();
+      await handler(makeReq({ body: { difficulty: diff }, ip: freshIp() }), res);
+      assert.equal(res.statusCode, 200);
+    } finally {
+      restore();
+      if (prev !== undefined) process.env.GEMINI_API_KEY = prev;
+      else delete process.env.GEMINI_API_KEY;
+    }
+  });
+}
+
+test('handler：缺省 difficulty 回 400', async () => {
+  const req = makeReq({ body: {}, ip: freshIp() });
+  const res = makeRes();
+  await handler(req, res);
+  assert.equal(res.statusCode, 400);
+});
+
+test('handler：POST 來源不在白名單時回 403', async () => {
+  const req = makeReq({ method: 'POST', origin: 'https://evil.example', ip: freshIp() });
+  const res = makeRes();
+  await handler(req, res);
+  assert.equal(res.statusCode, 403);
+});
+
+test('handler：Gemini 回傳 garbage JSON 時回 502', async () => {
+  const prev = process.env.GEMINI_API_KEY;
+  process.env.GEMINI_API_KEY = 'test-key';
+  const restore = stubFetch(async () => ({
+    ok: true,
+    json: async () => ({
+      candidates: [{ content: { parts: [{ text: 'not json at all' }] } }],
+    }),
+  }));
+  try {
+    const res = makeRes();
+    await handler(makeReq({ ip: freshIp() }), res);
+    assert.equal(res.statusCode, 502);
+  } finally {
+    restore();
+    if (prev !== undefined) process.env.GEMINI_API_KEY = prev;
+    else delete process.env.GEMINI_API_KEY;
+  }
+});
+
+test('handler：Gemini 回傳結構不符時回 502', async () => {
+  const prev = process.env.GEMINI_API_KEY;
+  process.env.GEMINI_API_KEY = 'test-key';
+  const bad = makeQuestion();
+  bad.a = '不在選項中';
+  const restore = stubFetch(geminiOk([bad, makeQuestion(), makeQuestion()]));
+  try {
+    const res = makeRes();
+    await handler(makeReq({ ip: freshIp() }), res);
+    assert.equal(res.statusCode, 502);
+  } finally {
+    restore();
+    if (prev !== undefined) process.env.GEMINI_API_KEY = prev;
+    else delete process.env.GEMINI_API_KEY;
+  }
+});
+
+test('handler：Gemini 回傳 markdown 包裝的 JSON 時回 200', async () => {
+  const prev = process.env.GEMINI_API_KEY;
+  process.env.GEMINI_API_KEY = 'test-key';
+  const wrapped = '```json\n' + JSON.stringify(threeQuestions()) + '\n```';
+  const restore = stubFetch(async () => ({
+    ok: true,
+    json: async () => ({
+      candidates: [{ content: { parts: [{ text: wrapped }] } }],
+    }),
+  }));
+  try {
+    const res = makeRes();
+    await handler(makeReq({ ip: freshIp() }), res);
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.body.questions.length, 3);
+  } finally {
+    restore();
+    if (prev !== undefined) process.env.GEMINI_API_KEY = prev;
+    else delete process.env.GEMINI_API_KEY;
   }
 });

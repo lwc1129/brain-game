@@ -17,8 +17,10 @@ js/
   analytics.js              GA4 事件
   app.js                    畫面渲染與事件繫結（進入點）
 tests/
-  logic.test.mjs            前端遊戲邏輯單元測試（19 個測試，node --test）
-  proxy.test.mjs            AI proxy 單元測試（21 個測試，涵蓋限流、CORS、handler）
+  logic.test.mjs            前端遊戲邏輯單元測試（node --test）
+  proxy.test.mjs            AI proxy 單元測試（涵蓋限流、CORS、handler）
+  ai.test.mjs               AI 出題模組測試（mock fetch）
+  integration/              整合測試（遊戲流程 profile + proxy 序列）
 api/questions.js            Vercel Serverless Function：Gemini API 代理（金鑰保管處）
 generate_questions.py       每週題庫擴充腳本（合併＋去重＋上限）
 seed_questions.py           一次性種題腳本（把各難度補滿到 300 題，可重現）
@@ -69,7 +71,7 @@ questions.json              動態題庫（GitHub Actions 每週自動擴充）
 - 內建 fallback 題庫 120 題（各難度 30 題），questions.json 載入失敗時離線可玩。
 - GitHub Actions 每週呼叫 Gemini 自動「擴充」：新題與舊題合併、
   以題目文字去重、每難度上限 300 題（超過時淘汰最舊）。
-- 前端記錄每個難度最近 21 題（約一週份量），抽題時優先排除，降低重複感。
+- 前端記錄每個難度最近 60 題（約 20 天份量），抽題時優先排除，降低重複感。
 - 選項順序在出題時隨機打亂。
 
 ## 無障礙（目標客群：長者）

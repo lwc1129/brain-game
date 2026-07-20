@@ -9,6 +9,12 @@
 //  - RATE_LIMIT_MAX（選填）：單一來源於視窗內允許的請求數；預設 30
 //  - RATE_LIMIT_WINDOW_MS（選填）：限流視窗長度（毫秒）；預設 60000
 
+// isValidQuestions 與前端 js/logic.js 共用，避免 proxy 與前端驗證邏輯漂移。
+// Vercel serverless 可直接 import 同 repo 的 ES module。
+import { isValidQuestions } from '../js/logic.js';
+
+export { isValidQuestions };
+
 const DIFFICULTIES = new Set(['hard', 'medium', 'easy', 'super_easy']);
 const QUESTIONS_PER_DAY = 3;
 const MODEL_NAME = 'gemini-2.5-flash';
@@ -123,25 +129,6 @@ export function buildPrompt(diffKey, types = []) {
   );
 }
 
-export function isValidQuestions(qs) {
-  return (
-    Array.isArray(qs) &&
-    qs.length >= QUESTIONS_PER_DAY &&
-    qs.every(
-      (q) =>
-        q &&
-        typeof q.type === 'string' &&
-        typeof q.q === 'string' &&
-        typeof q.a === 'string' &&
-        Array.isArray(q.opts) &&
-        q.opts.length === 4 &&
-        q.opts.every((o) => typeof o === 'string') &&
-        new Set(q.opts).size === 4 &&
-        q.opts.includes(q.a)
-    )
-  );
-}
-
 async function callGemini(diffKey, apiKey) {
   // 指定題型是 best-effort：模型偏離指定題型時不拒絕，
   // 回應仍一律由 isValidQuestions 把關。
@@ -249,7 +236,17 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-  if (!isAllowedOrigin) return res.status(403).json({ error: 'origin not allowed' });
+  if (!isAllowedOrigin) {
+    console.warn(
+      JSON.stringify({
+        level: 'warn',
+        ts: new Date().toISOString(),
+        msg: 'origin not allowed',
+        ctx: { origin },
+      })
+    );
+    return res.status(403).json({ error: 'origin not allowed' });
+  }
   if (req.method === 'OPTIONS') return res.status(204).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'method not allowed' });
 
@@ -265,6 +262,14 @@ export default async function handler(req, res) {
   res.setHeader('X-RateLimit-Remaining', String(rl.remaining));
   if (!rl.allowed) {
     res.setHeader('Retry-After', String(Math.ceil(rl.retryAfterMs / 1000)));
+    console.warn(
+      JSON.stringify({
+        level: 'warn',
+        ts: new Date().toISOString(),
+        msg: 'rate limit exceeded',
+        ctx: { clientKey: getClientKey(req), remaining: 0 },
+      })
+    );
     return res.status(429).json({ error: 'rate limit exceeded' });
   }
 
