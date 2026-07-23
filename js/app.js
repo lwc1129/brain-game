@@ -151,7 +151,7 @@ async function handleStartGame() {
   _data.aiGenerated = false;
   if (aiEnabled()) {
     clearLoadingMsgTimer();
-    _loadingMsgTimer = renderLoading(mainArea(), diff.label);
+    _loadingMsgTimer = renderLoading(mainArea(), diff.label, clearLoadingMsgTimer);
     const aiQs = await fetchAiQuestions(TODAY, diff.key);
     clearLoadingMsgTimer();
     if (aiQs) {

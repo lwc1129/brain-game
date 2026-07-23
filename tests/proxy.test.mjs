@@ -354,14 +354,28 @@ test('handler：成功取得題目回 200 與題組', async () => {
 test('handler：Gemini 回非 2xx 時回 502', async () => {
   const prev = process.env.GEMINI_API_KEY;
   process.env.GEMINI_API_KEY = 'test-key';
-  const restore = stubFetch(async () => ({ ok: false, json: async () => ({}) }));
+  const errors = [];
+  const origErr = console.error;
+  console.error = (msg) => errors.push(msg);
+  const restore = stubFetch(async () => ({
+    ok: false,
+    status: 503,
+    statusText: 'Service Unavailable',
+    json: async () => ({}),
+  }));
   try {
     const req = makeReq({ ip: freshIp() });
     const res = makeRes();
     await handler(req, res);
     assert.equal(res.statusCode, 502);
+    const entry = JSON.parse(errors.find((m) => m.includes('Gemini 回應非 2xx')) || '{}');
+    assert.equal(entry.level, 'error');
+    assert.equal(entry.ctx.status, 503);
+    assert.equal(entry.ctx.statusText, 'Service Unavailable');
+    assert.equal(entry.ctx.diffKey, 'easy');
   } finally {
     restore();
+    console.error = origErr;
     if (prev !== undefined) process.env.GEMINI_API_KEY = prev;
     else delete process.env.GEMINI_API_KEY;
   }
