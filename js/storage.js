@@ -1,10 +1,12 @@
 // localStorage 存取層：所有 key 沿用既有命名空間，升級不影響舊使用者資料。
 import { APP_NAMESPACE } from './config.js';
+import { logError } from './logger.js';
 
 function read(key) {
   try {
     return localStorage.getItem(`${APP_NAMESPACE}:${key}`);
-  } catch {
+  } catch (e) {
+    logError({ op: 'read', key }, e);
     return null;
   }
 }
@@ -12,14 +14,17 @@ function read(key) {
 function write(key, value) {
   try {
     localStorage.setItem(`${APP_NAMESPACE}:${key}`, value);
-  } catch {}
+  } catch (e) {
+    logError({ op: 'write', key }, e);
+  }
 }
 
 function readJson(key) {
   try {
     const r = read(key);
     return r ? JSON.parse(r) : null;
-  } catch {
+  } catch (e) {
+    logError({ op: 'readJson', key }, e);
     return null;
   }
 }
