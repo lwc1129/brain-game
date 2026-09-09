@@ -1,3 +1,5 @@
+import { QUESTIONS_PER_DAY } from '../logic.js';
+
 export function escapeHtml(value) {
   return String(value)
     .replaceAll('&', '&amp;')
@@ -24,7 +26,7 @@ export function historyRowsHtml(hist) {
       (d) => `
         <div class="history-row">
           <span class="hr-date">${d.date.replace(/-/g, '/')}</span>
-          <span class="hr-info">👟${Number(d.steps).toLocaleString()}步　✓${d.correct}/3</span>
+          <span class="hr-info">👟${Number(d.steps).toLocaleString()}步　✓${d.correct}/${QUESTIONS_PER_DAY}</span>
           <span class="hr-score">+${d.score}</span>
         </div>`
     )

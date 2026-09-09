@@ -1,4 +1,5 @@
 import { statRowHtml, historyRowsHtml } from './helpers.js';
+import { MAX_STEPS } from '../logic.js';
 
 export const PREFETCH_DEBOUNCE_MS = 400;
 
@@ -8,7 +9,7 @@ function stepSectionHtml() {
       <h2 class="stitle" id="stepTitle">👟 今天走了幾步？</h2>
       <div class="step-row">
         <label for="si" class="visually-hidden">今日步數</label>
-        <input type="number" id="si" placeholder="例：4500" min="0" max="99999" inputmode="numeric" aria-describedby="db">
+        <input type="number" id="si" placeholder="例：4500" min="0" max="${MAX_STEPS}" inputmode="numeric" aria-describedby="db">
         <span class="step-unit" aria-hidden="true">步</span>
       </div>
       <div id="db" class="diff-badge" style="display:none;" aria-live="polite"></div>
@@ -33,7 +34,7 @@ export function bindStepInput(prefetch, getDiff, aiEnabled) {
   document.getElementById('si').addEventListener('input', function () {
     const v = parseInt(this.value, 10);
     const db = document.getElementById('db');
-    if (!isNaN(v) && v >= 0) {
+    if (!isNaN(v) && v >= 0 && v <= MAX_STEPS) {
       const d = getDiff(v);
       db.innerHTML = `難度：<strong>${d.label}</strong>　${d.msg}`;
       db.style.display = 'flex';

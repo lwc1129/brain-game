@@ -1,5 +1,5 @@
 import { statRowHtml, historyRowsHtml, qSourceLabel, sourceBannerHtml } from './helpers.js';
-import { shareMsg } from '../logic.js';
+import { QUESTIONS_PER_DAY, shareMsg } from '../logic.js';
 
 export const COPY_FEEDBACK_MS = 2000;
 
@@ -12,7 +12,7 @@ function shareCardHtml(today, data, c, sc, diff, hist, dots) {
       <div class="st">今日完成！</div>
       <div class="share-stats">
         <div class="ss"><div class="ss-n">${Number(data.steps).toLocaleString()}</div><div class="ss-l">今日步數</div></div>
-        <div class="ss"><div class="ss-n">${c} / 3</div><div class="ss-l">答對題數</div></div>
+        <div class="ss"><div class="ss-n">${c} / ${QUESTIONS_PER_DAY}</div><div class="ss-l">答對題數</div></div>
         <div class="ss"><div class="ss-n">+${sc}</div><div class="ss-l">今日得分</div></div>
       </div>
       <div class="sdiff">${diff.label}　·　${qSourceLabel(data.aiGenerated)}</div>
@@ -41,7 +41,7 @@ export function buildCompleteHtml(today, data, c, sc, diff, hist, dots) {
 }
 
 export function buildShareText(today, data, c, dots) {
-  return `📅 ${today.replace(/-/g, '/')}\n👟 今日步數：${Number(data.steps).toLocaleString()} 步\n🧠 答題成績：${c}/3 題\n${dots}\n${shareMsg(c)}\n每日認知挑戰 ✨`;
+  return `📅 ${today.replace(/-/g, '/')}\n👟 今日步數：${Number(data.steps).toLocaleString()} 步\n🧠 答題成績：${c}/${QUESTIONS_PER_DAY} 題\n${dots}\n${shareMsg(c)}\n每日認知挑戰 ✨`;
 }
 
 export function bindCompleteEvents(txt, sc, c, onBack, onRetry, onShare) {

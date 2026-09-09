@@ -13,6 +13,9 @@ export const STREAK_STEP_GOAL = 3000;
 // 歷史記錄保留筆數上限。
 export const MAX_HISTORY_LOG = 30;
 
+// 步數輸入上限，與 index.html #si 的 max 屬性對齊。
+export const MAX_STEPS = 99999;
+
 export function formatDateKey(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }

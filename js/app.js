@@ -7,6 +7,7 @@ import {
   formatFullDate,
   getDiff,
   isValidQuestionBank,
+  MAX_STEPS,
   pickQuestions,
   QUESTIONS_PER_DAY,
   revertDailyResult,
@@ -141,7 +142,7 @@ function renderStep() {
 
 async function handleStartGame() {
   const v = parseInt(document.getElementById('si').value, 10);
-  if (isNaN(v) || v < 0) {
+  if (isNaN(v) || v < 0 || v > MAX_STEPS) {
     alert('請輸入有效步數');
     return;
   }
