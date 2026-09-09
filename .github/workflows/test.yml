@@ -38,7 +38,7 @@ jobs:
           node-version: '22'
 
       - name: Run frontend logic tests
-        run: node --test tests/*.test.mjs
+        run: npm test
 
       - name: Validate questions.json against frontend schema
         run: |
