@@ -212,6 +212,54 @@ test('applyDailyResult：記錄超過上限時裁掉最舊', () => {
   assert.equal(next.log.at(-1).date, '2026-06-10');
 });
 
+// #33：同日重複套用不得灌水 total／log（返回主頁後重玩的防禦層）
+test('applyDailyResult：同日已有記錄時以新結果取代，不重複累加', () => {
+  const first = applyDailyResult(
+    { total: 0, streak: 0, lastDate: null, log: [] },
+    { today: '2026-06-10', yesterday: '2026-06-09', steps: 5000, correct: 2, score: 20 }
+  );
+  assert.equal(first.total, 20);
+  assert.equal(first.log.length, 1);
+
+  const second = applyDailyResult(first, {
+    today: '2026-06-10',
+    yesterday: '2026-06-09',
+    steps: 4000,
+    correct: 1,
+    score: 10,
+  });
+  assert.equal(second.total, 10, 'total 應為新分數，非 20+10');
+  assert.equal(second.log.length, 1, '同日只保留一筆記錄');
+  assert.equal(second.log[0].score, 10);
+  assert.equal(second.log[0].steps, 4000);
+  assert.equal(second.streak, 1);
+  assert.equal(second.lastDate, '2026-06-10');
+});
+
+// #33：修復前已被本 bug 污染成同日多筆的歷史，重玩時必須把每一筆都扣回，
+// 否則 revertDailyResult 移除全部同日記錄、卻只扣第一筆分數，會殘留灌水。
+test('applyDailyResult：同日已有多筆污染記錄時，撤銷金額需加總全部同日分數', () => {
+  const corrupted = {
+    total: 30,
+    streak: 1,
+    lastDate: '2026-06-10',
+    log: [
+      { date: '2026-06-10', steps: 5000, correct: 2, score: 20 },
+      { date: '2026-06-10', steps: 5000, correct: 1, score: 10 },
+    ],
+  };
+  const next = applyDailyResult(corrupted, {
+    today: '2026-06-10',
+    yesterday: '2026-06-09',
+    steps: 5000,
+    correct: 3,
+    score: 35,
+  });
+  assert.equal(next.total, 35, 'total 應只剩新分數，不得殘留舊的重複分數');
+  assert.equal(next.log.length, 1, '污染的同日多筆記錄應收斂為一筆');
+  assert.equal(next.log[0].score, 35);
+});
+
 test('revertDailyResult 撤銷當日分數與記錄', () => {
   const hist = {
     total: 135,
@@ -226,9 +274,48 @@ test('revertDailyResult 撤銷當日分數與記錄', () => {
   assert.equal(next.total, 100);
   assert.equal(next.log.length, 1);
   assert.equal(next.log[0].date, '2026-06-09');
-  // streak/lastDate 必須回滾，不能保留撤銷前的虛高連勝
-  assert.equal(next.streak, 1);
+  // lastDate===today 時從 stored streak 撤一日，不從可能被截斷的 log 重算
+  assert.equal(next.streak, 2);
   assert.equal(next.lastDate, '2026-06-09');
+});
+
+// #33 Codex P1：streak > MAX_HISTORY_LOG 時，同日取代不得從 capped log 重算而永久縮水
+test('applyDailyResult：streak 超過 MAX_HISTORY_LOG 時同日重玩須保留 streak', () => {
+  const today = '2026-06-10';
+  const yesterday = '2026-06-09';
+  const streakDays = MAX_HISTORY_LOG + 5; // 35 > 30
+  const log = [];
+  for (let i = MAX_HISTORY_LOG - 1; i >= 0; i--) {
+    const d = new Date(`${today}T12:00:00`);
+    d.setDate(d.getDate() - i);
+    log.push({
+      date: formatDateKey(d),
+      steps: 5000,
+      correct: 3,
+      score: 35,
+    });
+  }
+  const hist = {
+    total: streakDays * 35,
+    streak: streakDays,
+    lastDate: today,
+    log,
+  };
+  assert.equal(hist.log.length, MAX_HISTORY_LOG);
+
+  const replaced = applyDailyResult(hist, {
+    today,
+    yesterday,
+    steps: 5000,
+    correct: 2,
+    score: 20,
+  });
+  assert.equal(replaced.streak, streakDays, '同日重玩不得把 31+ streak 縮成 ≤ MAX_HISTORY_LOG');
+  assert.equal(replaced.lastDate, today);
+  assert.equal(replaced.total, streakDays * 35 - 35 + 20);
+  assert.equal(replaced.log.length, MAX_HISTORY_LOG);
+  assert.equal(replaced.log.filter((e) => e.date === today).length, 1);
+  assert.equal(replaced.log.at(-1).score, 20);
 });
 
 // ── 題庫驗證 ─────────────────────────────────────────────────────────────

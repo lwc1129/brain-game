@@ -121,6 +121,48 @@ test('integration [retry-flow]: 完成後 revert 再重新 apply', () => {
   });
 });
 
+// #33：完成 → 返回主頁（清空當日進度、不撤銷成績）→ 再完成，不得同日重複計分
+test('integration [return-home-replay]: 返回主頁後重玩不重複計分', () => {
+  runProfile('return-home-replay', function returnHomeReplay() {
+    let hist = applyDailyResult(emptyHist(), {
+      today: '2026-06-10',
+      yesterday: '2026-06-09',
+      steps: 5000,
+      correct: 2,
+      score: 20,
+    });
+    assert.equal(hist.total, 20);
+    assert.equal(hist.log.length, 1);
+
+    // 模擬「返回主頁」：只重置當日進度（與 app.js onBack 對齊），不呼叫 revert
+    let data = { steps: null, questions: null, answers: [], completed: false, aiGenerated: false };
+    assert.equal(data.completed, false);
+    assert.equal(data.steps, null);
+
+    // 再次遊玩並完成（未先 revert）
+    hist = applyDailyResult(hist, {
+      today: '2026-06-10',
+      yesterday: '2026-06-09',
+      steps: 3000,
+      correct: 1,
+      score: 10,
+    });
+    data = {
+      steps: 3000,
+      questions: [],
+      answers: ['a'],
+      completed: true,
+      aiGenerated: false,
+    };
+
+    assert.equal(hist.total, 10, 'total 不得變成 30');
+    assert.equal(hist.log.length, 1, '同日不得出現 2 筆 log');
+    assert.equal(hist.log[0].date, '2026-06-10');
+    assert.equal(hist.log[0].score, 10);
+    assert.equal(data.completed, true);
+  });
+});
+
 test('integration [storage-cap]: history 達 MAX_HISTORY_LOG 後 trim', () => {
   runProfile('storage-cap', function storageCapTrim() {
     const log = Array.from({ length: MAX_HISTORY_LOG }, (_, i) => ({
