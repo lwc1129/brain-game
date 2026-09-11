@@ -5,11 +5,10 @@
 1. 從環境變數讀取 GEMINI_API_KEY（不 hardcode）。
 2. 呼叫 Gemini API，要求回傳嚴格 JSON 格式的新題目。
 3. 解析並「逐題」驗證新題：排除無效題、保留合法題（partial acceptance）。
-4. 有效新題數須達 MIN_VALID_NEW_QUESTIONS；否則失敗且不寫檔。
-5. 與既有 questions.json「合併」：以題目文字去重、新題附加在後、
-   每難度題數達上限時淘汰最舊的題目。題庫因此每週成長而非被覆蓋，
-   搭配前端的近期出題排除機制，降低熟客遇到重複題目的頻率。
-6. 合併後完整題庫仍須通過嚴格整批驗證；通過才寫入 questions.json。
+4. 與既有 questions.json 合併後，以實際新增題數對照 MIN_VALID_NEW_QUESTIONS；
+   低於門檻則失敗且不寫檔（全 duplicate／quota 剔除後不足也算失敗）。
+5. 合併後完整題庫仍須通過嚴格整批驗證；通過才寫入 questions.json。
+6. （保留）題庫以去重／上限合併成長，搭配前端近期出題排除降低重複。
 
 QB schema（與 index.html 內現有 QB 物件完全一致）：
 {
@@ -256,7 +255,8 @@ def filter_valid_generated_questions(data):
 
     不強制每個難度達 MIN_PER_DIFFICULTY（那是 merge 後整批 validation 的責任）。
     exclusions 每筆為 {"difficulty", "index", "reason"}。
-    最外層非 dict 時 raise ValueError（整份回應結構崩壞，無法部分接受）。
+    最外層非 dict、或缺必要難度 key 時 raise ValueError
+    （整份回應結構崩壞／schema 缺欄，無法部分接受；present 空陣列可接受）。
     """
     if not isinstance(data, dict):
         raise ValueError("題庫最外層必須是物件（dict）")
@@ -264,7 +264,10 @@ def filter_valid_generated_questions(data):
     filtered = {}
     exclusions = []
     for diff in DIFFICULTIES:
-        raw = data.get(diff, [])
+        # absent key ≠ present []：缺 key 視為 top-level schema 錯誤，直接拒絕。
+        if diff not in data:
+            raise ValueError(f"題庫缺少必要難度欄位：{diff}")
+        raw = data[diff]
         if not isinstance(raw, list):
             exclusions.append(
                 {
@@ -293,15 +296,38 @@ def filter_valid_generated_questions(data):
     return filtered, exclusions
 
 
-def process_generated_questions(existing, new_data):
-    """部分接受新題 → 門檻檢查 → merge → 嚴格整批驗證。
+def count_newly_added(existing, merged):
+    """計算 merge 後實際新增題數（survived dedupe／quota／跨難度去重）。"""
+    before = set()
+    for diff in DIFFICULTIES:
+        qs = existing.get(diff) if isinstance(existing.get(diff), list) else []
+        for q in qs:
+            if isinstance(q, dict) and isinstance(q.get("q"), str):
+                key = normalize_question_text(q["q"])
+                if key:
+                    before.add(key)
 
-    回傳 (merged, accepted_count)。
-    有效題數低於 MIN_VALID_NEW_QUESTIONS、或 merge 後整批不合法時 raise ValueError。
-    被排除題目會以結構化 warn log 記錄數量與原因。
+    added = 0
+    for diff in DIFFICULTIES:
+        qs = merged.get(diff) if isinstance(merged.get(diff), list) else []
+        for q in qs:
+            if isinstance(q, dict) and isinstance(q.get("q"), str):
+                key = normalize_question_text(q["q"])
+                if key and key not in before:
+                    before.add(key)
+                    added += 1
+    return added
+
+
+def process_generated_questions(existing, new_data):
+    """部分接受新題 → merge → 以實際新增數做門檻檢查 → 嚴格整批驗證。
+
+    回傳 (merged, accepted_count)；accepted_count 為 merge 後實際新增題數。
+    實際新增低於 MIN_VALID_NEW_QUESTIONS、或 merge 後整批不合法時 raise ValueError。
+    被排除題目會以結構化 warn log 記錄數量與原因；門檻失敗會 emit error log。
     """
     accepted, exclusions = filter_valid_generated_questions(new_data)
-    accepted_count = sum(len(accepted[d]) for d in DIFFICULTIES)
+    schema_valid_count = sum(len(accepted[d]) for d in DIFFICULTIES)
 
     if exclusions:
         log_structured(
@@ -309,7 +335,7 @@ def process_generated_questions(existing, new_data):
             "排除無效的新生成題目",
             {
                 "excluded_count": len(exclusions),
-                "accepted_count": accepted_count,
+                "accepted_count": schema_valid_count,
                 "reasons": [
                     {
                         "difficulty": e["difficulty"],
@@ -321,13 +347,25 @@ def process_generated_questions(existing, new_data):
             },
         )
 
+    merged = merge_question_banks(existing, accepted)
+    accepted_count = count_newly_added(existing, merged)
+
     if accepted_count < MIN_VALID_NEW_QUESTIONS:
+        log_structured(
+            "error",
+            "有效新題數低於最低有效題數門檻",
+            {
+                "accepted_count": accepted_count,
+                "required_count": MIN_VALID_NEW_QUESTIONS,
+                "excluded_count": len(exclusions),
+                "schema_valid_count": schema_valid_count,
+            },
+        )
         raise ValueError(
             f"有效新題數低於最低有效題數門檻：需要至少 {MIN_VALID_NEW_QUESTIONS} 題，"
             f"實際 {accepted_count} 題（已排除 {len(exclusions)} 題）"
         )
 
-    merged = merge_question_banks(existing, accepted)
     validate_questions(merged)
     return merged, accepted_count
 

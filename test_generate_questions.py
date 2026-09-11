@@ -10,7 +10,10 @@
 """
 
 import copy
+import io
+import json
 import unittest
+from unittest.mock import patch
 
 from generate_questions import (
     DIFFICULTIES,
@@ -431,6 +434,69 @@ class TestPartialAcceptance(unittest.TestCase):
     def test_min_valid_new_questions_is_named_constant(self):
         self.assertIsInstance(MIN_VALID_NEW_QUESTIONS, int)
         self.assertGreaterEqual(MIN_VALID_NEW_QUESTIONS, 1)
+
+    def test_threshold_failure_emits_structured_error_log(self):
+        # Codex P1：門檻失敗須在 raise 前 emit 結構化 error log。
+        data = {diff: [] for diff in DIFFICULTIES}
+        data["hard"] = [
+            _make_question(text=f"hard only {i}？")
+            for i in range(MIN_VALID_NEW_QUESTIONS - 1)
+        ]
+        stderr = io.StringIO()
+        with patch("sys.stderr", stderr):
+            with self.assertRaises(ValueError) as ctx:
+                process_generated_questions(_make_valid_data(), data)
+        self.assertIn("最低有效題數", str(ctx.exception))
+        error_records = [
+            json.loads(line)
+            for line in stderr.getvalue().splitlines()
+            if line.strip().startswith("{")
+        ]
+        error_records = [r for r in error_records if r.get("level") == "error"]
+        self.assertEqual(len(error_records), 1)
+        record = error_records[0]
+        self.assertIn("ts", record)
+        self.assertIn("msg", record)
+        ctx = record["ctx"]
+        self.assertEqual(ctx["accepted_count"], MIN_VALID_NEW_QUESTIONS - 1)
+        self.assertEqual(ctx["required_count"], MIN_VALID_NEW_QUESTIONS)
+        self.assertIn("excluded_count", ctx)
+
+    def test_missing_difficulty_key_is_rejected(self):
+        # Codex P2：缺難度 key 不可 default [] 隱藏；present empty list 仍可接受。
+        data = self._bank_with_n(MIN_PER_DIFFICULTY, prefix="完整")
+        del data["easy"]
+        with self.assertRaises(ValueError) as ctx:
+            filter_valid_generated_questions(data)
+        self.assertIn("缺少必要難度欄位", str(ctx.exception))
+        self.assertIn("easy", str(ctx.exception))
+
+        present_empty = self._bank_with_n(MIN_PER_DIFFICULTY, prefix="有空")
+        present_empty["easy"] = []
+        filtered, exclusions = filter_valid_generated_questions(present_empty)
+        self.assertEqual(filtered["easy"], [])
+        self.assertEqual(exclusions, [])
+
+    def test_threshold_uses_post_merge_added_count(self):
+        # Codex P2：全 duplicate 時 schema 合法數達門檻，但 merge 後新增為 0 → 須失敗。
+        existing = self._bank_with_n(MIN_VALID_NEW_QUESTIONS, prefix="既有")
+        # 與既有題文完全相同 → merge 後 0 題新增。
+        duplicates = self._bank_with_n(MIN_VALID_NEW_QUESTIONS, prefix="既有")
+        schema_valid = sum(len(duplicates[d]) for d in DIFFICULTIES)
+        self.assertGreaterEqual(schema_valid, MIN_VALID_NEW_QUESTIONS)
+        stderr = io.StringIO()
+        with patch("sys.stderr", stderr):
+            with self.assertRaises(ValueError) as ctx:
+                process_generated_questions(existing, duplicates)
+        self.assertIn("最低有效題數", str(ctx.exception))
+        self.assertIn("實際 0 題", str(ctx.exception))
+        error_records = [
+            json.loads(line)
+            for line in stderr.getvalue().splitlines()
+            if line.strip().startswith("{")
+        ]
+        error_records = [r for r in error_records if r.get("level") == "error"]
+        self.assertEqual(error_records[0]["ctx"]["accepted_count"], 0)
 
 
 class TestRebalance(unittest.TestCase):
