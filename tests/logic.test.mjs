@@ -236,6 +236,30 @@ test('applyDailyResult：同日已有記錄時以新結果取代，不重複累�
   assert.equal(second.lastDate, '2026-06-10');
 });
 
+// #33：修復前已被本 bug 污染成同日多筆的歷史，重玩時必須把每一筆都扣回，
+// 否則 revertDailyResult 移除全部同日記錄、卻只扣第一筆分數，會殘留灌水。
+test('applyDailyResult：同日已有多筆污染記錄時，撤銷金額需加總全部同日分數', () => {
+  const corrupted = {
+    total: 30,
+    streak: 1,
+    lastDate: '2026-06-10',
+    log: [
+      { date: '2026-06-10', steps: 5000, correct: 2, score: 20 },
+      { date: '2026-06-10', steps: 5000, correct: 1, score: 10 },
+    ],
+  };
+  const next = applyDailyResult(corrupted, {
+    today: '2026-06-10',
+    yesterday: '2026-06-09',
+    steps: 5000,
+    correct: 3,
+    score: 35,
+  });
+  assert.equal(next.total, 35, 'total 應只剩新分數，不得殘留舊的重複分數');
+  assert.equal(next.log.length, 1, '污染的同日多筆記錄應收斂為一筆');
+  assert.equal(next.log[0].score, 35);
+});
+
 test('revertDailyResult 撤銷當日分數與記錄', () => {
   const hist = {
     total: 135,

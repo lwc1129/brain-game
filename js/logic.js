@@ -102,8 +102,11 @@ export function shareMsg(c) {
 // 完成當日挑戰後更新歷史統計（回傳新物件，不修改傳入的 hist）。
 // 同日冪等：若 log 已有當日記錄，先撤銷舊筆再寫入，避免「返回主頁後重玩」重複計分（#33）。
 export function applyDailyResult(hist, { today, yesterday, steps, correct, score }) {
-  const existing = hist.log.find((e) => e.date === today);
-  const base = existing ? revertDailyResult(hist, { today, score: existing.score }) : hist;
+  // revertDailyResult 會移除「所有」當日記錄，因此撤銷金額必須加總同日每一筆分數。
+  // 只取第一筆會讓「修復前已被本 bug 污染成同日多筆」的歷史殘留扣不回的灌水分數。
+  const hadToday = hist.log.some((e) => e.date === today);
+  const priorScore = hist.log.reduce((sum, e) => (e.date === today ? sum + e.score : sum), 0);
+  const base = hadToday ? revertDailyResult(hist, { today, score: priorScore }) : hist;
   const next = { ...base, log: [...base.log] };
   if (steps >= STREAK_STEP_GOAL) {
     if (next.lastDate === yesterday) next.streak += 1;
