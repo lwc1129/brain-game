@@ -274,9 +274,48 @@ test('revertDailyResult 撤銷當日分數與記錄', () => {
   assert.equal(next.total, 100);
   assert.equal(next.log.length, 1);
   assert.equal(next.log[0].date, '2026-06-09');
-  // streak/lastDate 必須回滾，不能保留撤銷前的虛高連勝
-  assert.equal(next.streak, 1);
+  // lastDate===today 時從 stored streak 撤一日，不從可能被截斷的 log 重算
+  assert.equal(next.streak, 2);
   assert.equal(next.lastDate, '2026-06-09');
+});
+
+// #33 Codex P1：streak > MAX_HISTORY_LOG 時，同日取代不得從 capped log 重算而永久縮水
+test('applyDailyResult：streak 超過 MAX_HISTORY_LOG 時同日重玩須保留 streak', () => {
+  const today = '2026-06-10';
+  const yesterday = '2026-06-09';
+  const streakDays = MAX_HISTORY_LOG + 5; // 35 > 30
+  const log = [];
+  for (let i = MAX_HISTORY_LOG - 1; i >= 0; i--) {
+    const d = new Date(`${today}T12:00:00`);
+    d.setDate(d.getDate() - i);
+    log.push({
+      date: formatDateKey(d),
+      steps: 5000,
+      correct: 3,
+      score: 35,
+    });
+  }
+  const hist = {
+    total: streakDays * 35,
+    streak: streakDays,
+    lastDate: today,
+    log,
+  };
+  assert.equal(hist.log.length, MAX_HISTORY_LOG);
+
+  const replaced = applyDailyResult(hist, {
+    today,
+    yesterday,
+    steps: 5000,
+    correct: 2,
+    score: 20,
+  });
+  assert.equal(replaced.streak, streakDays, '同日重玩不得把 31+ streak 縮成 ≤ MAX_HISTORY_LOG');
+  assert.equal(replaced.lastDate, today);
+  assert.equal(replaced.total, streakDays * 35 - 35 + 20);
+  assert.equal(replaced.log.length, MAX_HISTORY_LOG);
+  assert.equal(replaced.log.filter((e) => e.date === today).length, 1);
+  assert.equal(replaced.log.at(-1).score, 20);
 });
 
 // ── 題庫驗證 ─────────────────────────────────────────────────────────────

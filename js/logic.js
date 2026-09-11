@@ -119,22 +119,21 @@ export function applyDailyResult(hist, { today, yesterday, steps, correct, score
   return next;
 }
 
-// 重新挑戰時撤銷當日結果（回傳新物件）。
-// 同時從剩餘 log 重算 streak/lastDate，避免撤銷後保留虛高的連勝紀錄。
+// 重新挑戰／同日取代時撤銷當日結果（回傳新物件）。
+// streak/lastDate：若當日是連勝尖端（lastDate===today），從 stored streak 撤一日；
+// 不可從剩餘 log 重算——log 有 MAX_HISTORY_LOG 上限，重算會把 31+ 連勝永久縮水（#33 Codex P1）。
 export function revertDailyResult(hist, { today, score }) {
   const log = hist.log.filter((d) => d.date !== today);
-  const qualifying = log.filter((e) => e.steps >= STREAK_STEP_GOAL);
-  let streak = 0;
-  let lastDate = null;
-  if (qualifying.length > 0) {
-    lastDate = qualifying.at(-1).date;
-    streak = 1;
-    for (let i = qualifying.length - 1; i > 0; i--) {
-      const curr = new Date(qualifying[i].date);
-      const expected = new Date(curr);
-      expected.setDate(expected.getDate() - 1);
-      if (qualifying[i - 1].date === formatDateKey(expected)) streak++;
-      else break;
+  let streak = hist.streak;
+  let lastDate = hist.lastDate;
+  if (lastDate === today) {
+    streak = Math.max(0, streak - 1);
+    if (streak > 0) {
+      const prev = new Date(`${today}T12:00:00`);
+      prev.setDate(prev.getDate() - 1);
+      lastDate = formatDateKey(prev);
+    } else {
+      lastDate = null;
     }
   }
   return { ...hist, total: hist.total - score, log, streak, lastDate };
