@@ -227,7 +227,10 @@ function renderComplete() {
     sc,
     c,
     () => {
-      _data.completed = false;
+      // 返回主頁：清空當日進度並落地，避免 memory/localStorage 不一致與重整跳回完成頁（#33）。
+      // 不撤銷成績——重玩計分由 applyDailyResult 同日冪等保護；正式重挑戰走「重新挑戰」。
+      _data = { steps: null, questions: null, answers: [], completed: false, aiGenerated: false };
+      saveTodayData(TODAY, _data);
       renderStep();
     },
     () => {

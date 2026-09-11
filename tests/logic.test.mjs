@@ -212,6 +212,30 @@ test('applyDailyResult：記錄超過上限時裁掉最舊', () => {
   assert.equal(next.log.at(-1).date, '2026-06-10');
 });
 
+// #33：同日重複套用不得灌水 total／log（返回主頁後重玩的防禦層）
+test('applyDailyResult：同日已有記錄時以新結果取代，不重複累加', () => {
+  const first = applyDailyResult(
+    { total: 0, streak: 0, lastDate: null, log: [] },
+    { today: '2026-06-10', yesterday: '2026-06-09', steps: 5000, correct: 2, score: 20 }
+  );
+  assert.equal(first.total, 20);
+  assert.equal(first.log.length, 1);
+
+  const second = applyDailyResult(first, {
+    today: '2026-06-10',
+    yesterday: '2026-06-09',
+    steps: 4000,
+    correct: 1,
+    score: 10,
+  });
+  assert.equal(second.total, 10, 'total 應為新分數，非 20+10');
+  assert.equal(second.log.length, 1, '同日只保留一筆記錄');
+  assert.equal(second.log[0].score, 10);
+  assert.equal(second.log[0].steps, 4000);
+  assert.equal(second.streak, 1);
+  assert.equal(second.lastDate, '2026-06-10');
+});
+
 test('revertDailyResult 撤銷當日分數與記錄', () => {
   const hist = {
     total: 135,

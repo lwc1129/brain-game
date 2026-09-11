@@ -100,8 +100,11 @@ export function shareMsg(c) {
 }
 
 // 完成當日挑戰後更新歷史統計（回傳新物件，不修改傳入的 hist）。
+// 同日冪等：若 log 已有當日記錄，先撤銷舊筆再寫入，避免「返回主頁後重玩」重複計分（#33）。
 export function applyDailyResult(hist, { today, yesterday, steps, correct, score }) {
-  const next = { ...hist, log: [...hist.log] };
+  const existing = hist.log.find((e) => e.date === today);
+  const base = existing ? revertDailyResult(hist, { today, score: existing.score }) : hist;
+  const next = { ...base, log: [...base.log] };
   if (steps >= STREAK_STEP_GOAL) {
     if (next.lastDate === yesterday) next.streak += 1;
     else if (next.lastDate !== today) next.streak = 1;
