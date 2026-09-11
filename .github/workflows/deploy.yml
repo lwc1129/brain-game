@@ -4,6 +4,15 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+  # 供 update_questions.yml 在 validation 通過並 commit 後直接呼叫部署，
+  # 不依賴 GITHUB_TOKEN push 事件（該事件不會觸發後續 workflow）。
+  workflow_call:
+    inputs:
+      ref:
+        description: 要部署的 git ref（題庫更新 commit SHA）；空白則使用呼叫方 github.sha
+        type: string
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -25,6 +34,11 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # workflow_call 時呼叫方可能剛 push 了新 commit；必須 checkout 該 SHA，
+          # 否則會部署到觸發更新 workflow 當下的舊樹。
+          # 空字串在 Actions 表達式中為 falsy，會回落到 github.sha（push / dispatch）。
+          ref: ${{ inputs.ref || github.sha }}
 
       # 注意：絕不把 GEMINI_API_KEY 注入前端。AI 出題一律經由後端 proxy
       # （見 api/questions.js），這裡只注入 proxy 網址與 GA ID 這類可公開的設定。

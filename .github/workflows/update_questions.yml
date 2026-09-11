@@ -6,12 +6,22 @@ on:
     - cron: '0 19 * * 0'
   workflow_dispatch:
 
+# contents:write 僅用於 generate 成功且 validation 通過後的 commit。
+# pages / id-token 授權給後續 workflow_call 部署 job（不使用 PAT）。
 permissions:
   contents: write
+  pages: write
+  id-token: write
+
+# 生產題庫驗證用公開 URL（與 repo Pages 設定一致）
+# PRODUCTION_QUESTIONS_URL = https://lwc1129.github.io/brain-game/questions.json
+# VERIFY_MAX_ATTEMPTS = 12；VERIFY_SLEEP_SECONDS = 10（約 2 分鐘內重試）
 
 jobs:
-  update-questions:
+  generate:
     runs-on: ubuntu-latest
+    outputs:
+      has_changes: ${{ steps.diff.outputs.has_changes }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -29,14 +39,117 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: python generate_questions.py
 
-      - name: Commit and push if changed
+      - name: Detect questions.json changes
+        id: diff
         run: |
+          set -euo pipefail
+          if git diff --quiet -- questions.json; then
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+            echo "questions.json 無變更。"
+          else
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+            echo "questions.json 有變更，將進入 validation。"
+          fi
+
+      - name: Upload generated questions.json
+        uses: actions/upload-artifact@v4
+        with:
+          name: generated-questions
+          path: questions.json
+          if-no-files-found: error
+
+  # generation 成功後才進 validation；失敗則整條鏈停止，不會 commit / deploy。
+  validate:
+    needs: generate
+    uses: ./.github/workflows/test.yml
+    with:
+      questions_artifact: generated-questions
+
+  # validation failure 不得 commit，因此也不得 deployment。
+  commit:
+    needs: [generate, validate]
+    if: needs.generate.outputs.has_changes == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      new_sha: ${{ steps.push.outputs.new_sha }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download validated questions.json
+        uses: actions/download-artifact@v4
+        with:
+          name: generated-questions
+          path: .
+
+      - name: Commit and push
+        id: push
+        run: |
+          set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add questions.json
           if git diff --cached --quiet; then
-            echo "questions.json 無變更，略過 commit。"
-          else
-            git commit -m "設定: 自動更新每週題庫"
-            git push
+            echo "questions.json 與 HEAD 相同，略過 commit。"
+            echo "new_sha=" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+          git commit -m "設定: 自動更新每週題庫"
+          git push
+          echo "new_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  # 以 workflow_call 觸發部署，不依賴 GITHUB_TOKEN push（該 push 不會觸發其他 workflow）。
+  # deploy.yml 本身不會再 push 程式碼，因此不會形成 recursive workflow loop。
+  deploy:
+    needs: [generate, validate, commit]
+    if: >-
+      needs.generate.outputs.has_changes == 'true'
+      && needs.validate.result == 'success'
+      && needs.commit.result == 'success'
+      && needs.commit.outputs.new_sha != ''
+    uses: ./.github/workflows/deploy.yml
+    with:
+      ref: ${{ needs.commit.outputs.new_sha }}
+    secrets: inherit
+
+  # 客觀驗證 production questions.json 與剛部署的版本一致。
+  verify-production:
+    needs: [commit, deploy]
+    if: needs.deploy.result == 'success' && needs.commit.outputs.new_sha != ''
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout deployed commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.commit.outputs.new_sha }}
+          persist-credentials: false
+
+      - name: Verify production questions.json matches repository
+        env:
+          PRODUCTION_QUESTIONS_URL: https://lwc1129.github.io/brain-game/questions.json
+          VERIFY_MAX_ATTEMPTS: '12'
+          VERIFY_SLEEP_SECONDS: '10'
+        run: |
+          set -euo pipefail
+          EXPECTED_SHA="$(sha256sum questions.json | awk '{print $1}')"
+          echo "Expected sha256=${EXPECTED_SHA}"
+          i=1
+          while [ "$i" -le "${VERIFY_MAX_ATTEMPTS}" ]; do
+            TMP="$(mktemp)"
+            if curl -fsSL "${PRODUCTION_QUESTIONS_URL}" -o "${TMP}"; then
+              ACTUAL_SHA="$(sha256sum "${TMP}" | awk '{print $1}')"
+              echo "Attempt ${i}: production sha256=${ACTUAL_SHA}"
+              if [ "${ACTUAL_SHA}" = "${EXPECTED_SHA}" ]; then
+                echo "Production questions.json 與 repository 一致。"
+                rm -f "${TMP}"
+                exit 0
+              fi
+            else
+              echo "Attempt ${i}: 無法下載 production questions.json，稍後重試。"
+            fi
+            rm -f "${TMP}"
+            i=$((i + 1))
+            sleep "${VERIFY_SLEEP_SECONDS}"
+          done
+          echo "Production questions.json 在時限內未與 repository 一致。"
+          exit 1
