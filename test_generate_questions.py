@@ -16,11 +16,14 @@ from generate_questions import (
     DIFFICULTIES,
     MAX_PER_DIFFICULTY,
     MIN_PER_DIFFICULTY,
+    MIN_VALID_NEW_QUESTIONS,
     TYPE_CAP,
     compute_type_counts,
+    filter_valid_generated_questions,
     merge_question_banks,
     normalize_question_text,
     parse_response_text,
+    process_generated_questions,
     validate_questions,
 )
 
@@ -306,6 +309,128 @@ class TestMergeQuestionBanks(unittest.TestCase):
     def test_merged_bank_passes_validation(self):
         merged = merge_question_banks(_make_valid_data(), self._bank(["另一題？"]))
         self.assertTrue(validate_questions(merged))
+
+
+class TestPartialAcceptance(unittest.TestCase):
+    """Issue #35：新生成題目逐題過濾，單一壞題不拖垮整批。"""
+
+    def _bank_with_n(self, n, prefix="題"):
+        return {
+            diff: [
+                _make_question(text=f"{diff} {prefix} {i}？") for i in range(n)
+            ]
+            for diff in DIFFICULTIES
+        }
+
+    def test_single_bad_question_does_not_reject_batch(self):
+        data = self._bank_with_n(MIN_PER_DIFFICULTY, prefix="好題")
+        data["hard"][1] = {
+            "type": "計算",
+            "q": "hard 壞題？",
+            "a": "Z",
+            "opts": ["A", "B", "C", "D"],
+        }
+        filtered, exclusions = filter_valid_generated_questions(data)
+        self.assertEqual(len(exclusions), 1)
+        self.assertIn("正確答案", exclusions[0]["reason"])
+        self.assertEqual(exclusions[0]["difficulty"], "hard")
+        self.assertEqual(exclusions[0]["index"], 1)
+        hard_texts = [q["q"] for q in filtered["hard"]]
+        self.assertNotIn("hard 壞題？", hard_texts)
+        self.assertEqual(len(filtered["hard"]), MIN_PER_DIFFICULTY - 1)
+        for diff in ("medium", "easy", "super_easy"):
+            self.assertEqual(len(filtered[diff]), MIN_PER_DIFFICULTY)
+
+    def test_all_bad_questions_fail_threshold(self):
+        data = {
+            diff: [
+                {
+                    "type": "計算",
+                    "q": f"{diff} 壞 {i}？",
+                    "a": "Z",
+                    "opts": ["A", "B", "C", "D"],
+                }
+                for i in range(MIN_PER_DIFFICULTY)
+            ]
+            for diff in DIFFICULTIES
+        }
+        with self.assertRaises(ValueError) as ctx:
+            process_generated_questions(_make_valid_data(), data)
+        self.assertIn("最低有效題數", str(ctx.exception))
+
+    def test_below_min_valid_new_questions_fails(self):
+        # 僅留下剛好低於門檻的有效題，其餘皆壞題。
+        self.assertGreater(MIN_VALID_NEW_QUESTIONS, 1)
+        data = {
+            diff: [
+                {
+                    "type": "計算",
+                    "q": f"{diff} 壞 {i}？",
+                    "a": "Z",
+                    "opts": ["A", "B", "C", "D"],
+                }
+                for i in range(5)
+            ]
+            for diff in DIFFICULTIES
+        }
+        # 只放 MIN_VALID_NEW_QUESTIONS - 1 題合法題，集中在 hard。
+        keep = MIN_VALID_NEW_QUESTIONS - 1
+        data["hard"] = [
+            _make_question(text=f"hard 好題 {i}？") for i in range(keep)
+        ]
+        with self.assertRaises(ValueError) as ctx:
+            process_generated_questions(_make_valid_data(), data)
+        msg = str(ctx.exception)
+        self.assertIn("最低有效題數", msg)
+        self.assertIn(str(MIN_VALID_NEW_QUESTIONS), msg)
+
+    def test_merged_bank_invalid_still_fails(self):
+        # 既有題庫各難度不足；新題通過過濾但合併後仍低於 MIN_PER_DIFFICULTY。
+        existing = {diff: [] for diff in DIFFICULTIES}
+        # 湊滿門檻總數，但集中在單一難度 → 其他難度合併後仍 0 題。
+        n = max(MIN_VALID_NEW_QUESTIONS, MIN_PER_DIFFICULTY)
+        new = {diff: [] for diff in DIFFICULTIES}
+        new["hard"] = [_make_question(text=f"hard only {i}？") for i in range(n)]
+        with self.assertRaises(ValueError) as ctx:
+            process_generated_questions(existing, new)
+        self.assertIn("題目數不足", str(ctx.exception))
+
+    def test_valid_questions_proceed_to_merge(self):
+        existing = self._bank_with_n(MIN_PER_DIFFICULTY, prefix="舊")
+        new = self._bank_with_n(MIN_PER_DIFFICULTY, prefix="新")
+        # 夾一題壞題，其餘應進入 merge。
+        new["easy"].append(
+            {
+                "type": "計算",
+                "q": "easy 壞題？",
+                "a": "Z",
+                "opts": ["A", "B", "C", "D"],
+            }
+        )
+        merged, accepted_count = process_generated_questions(existing, new)
+        self.assertTrue(validate_questions(merged))
+        self.assertEqual(accepted_count, MIN_PER_DIFFICULTY * len(DIFFICULTIES))
+        for diff in DIFFICULTIES:
+            texts = [q["q"] for q in merged[diff]]
+            self.assertIn(f"{diff} 舊 0？", texts)
+            self.assertIn(f"{diff} 新 0？", texts)
+        self.assertNotIn("easy 壞題？", [q["q"] for q in merged["easy"]])
+
+    def test_filter_records_exclusion_reasons(self):
+        data = self._bank_with_n(MIN_PER_DIFFICULTY)
+        data["medium"][0] = "not-a-dict"
+        del data["medium"][1]["a"]
+        data["medium"][2]["opts"] = ["A", "A", "C", "D"]
+        _, exclusions = filter_valid_generated_questions(data)
+        reasons = " ".join(e["reason"] for e in exclusions)
+        self.assertGreaterEqual(len(exclusions), 3)
+        self.assertIn("不是物件", reasons)
+        self.assertIn("缺少必要欄位", reasons)
+        self.assertIn("重複選項", reasons)
+
+    def test_min_valid_new_questions_is_named_constant(self):
+        self.assertIsInstance(MIN_VALID_NEW_QUESTIONS, int)
+        self.assertGreaterEqual(MIN_VALID_NEW_QUESTIONS, 1)
 
 
 class TestRebalance(unittest.TestCase):
