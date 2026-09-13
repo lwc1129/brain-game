@@ -4,11 +4,11 @@
 由 GitHub Actions 每週排程觸發。流程：
 1. 從環境變數讀取 GEMINI_API_KEY（不 hardcode）。
 2. 呼叫 Gemini API，要求回傳嚴格 JSON 格式的新題目。
-3. 解析並驗證回傳內容是否符合 QB schema。
-4. 與既有 questions.json「合併」：以題目文字去重、新題附加在後、
-   每難度題數達上限時淘汰最舊的題目。題庫因此每週成長而非被覆蓋，
-   搭配前端的近期出題排除機制，降低熟客遇到重複題目的頻率。
-5. 驗證通過才寫入 questions.json；任何失敗以非零 exit code 中止。
+3. 解析並「逐題」驗證新題：排除無效題、保留合法題（partial acceptance）。
+4. 與既有 questions.json 合併後，以實際新增題數對照 MIN_VALID_NEW_QUESTIONS；
+   低於門檻則失敗且不寫檔（全 duplicate／quota 剔除後不足也算失敗）。
+5. 合併後完整題庫仍須通過嚴格整批驗證；通過才寫入 questions.json。
+6. （保留）題庫以去重／上限合併成長，搭配前端近期出題排除降低重複。
 
 QB schema（與 index.html 內現有 QB 物件完全一致）：
 {
@@ -24,6 +24,7 @@ import json
 import os
 import sys
 import unicodedata
+from datetime import datetime, timezone
 
 # QB schema 的四個難度層級，順序與 index.html 一致。
 # merge_question_banks 依此順序做跨難度去重：同一題文出現在多個難度時，
@@ -37,6 +38,11 @@ ALLOWED_TYPES = ["計算", "邏輯", "數列", "推理", "語言", "記憶", "�
 # 每個難度的最低題目數。對齊前端 js/logic.js 的 pickQuestions()：
 # 每次抽 3 題，故每個難度至少需 3 題才能保證遊戲正常運作。
 MIN_PER_DIFFICULTY = 3
+
+# 新生成題目經逐題過濾後的最低有效題數（全難度合計）。
+# 低於此門檻視為生成品質不足，workflow 必須失敗且不得更新 questions.json。
+# 設為「每難度最低題數 × 難度數」，允許偶發單題壞格式，但仍要求足夠有效新題。
+MIN_VALID_NEW_QUESTIONS = MIN_PER_DIFFICULTY * len(DIFFICULTIES)
 
 # 合併後每個難度的題數上限，超過時淘汰最舊的題目。
 MAX_PER_DIFFICULTY = 300
@@ -144,6 +150,60 @@ def parse_response_text(text):
         raise ValueError(f"無法解析 Gemini 回傳為合法 JSON：{exc}") from exc
 
 
+def describe_question_defect(q):
+    """回傳單題缺陷原因字串；合法則回傳 None。
+
+    規則與 validate_questions 的單題檢查一致，供逐題過濾與 merge 共用。
+    """
+    if not isinstance(q, dict):
+        return "不是物件（dict）"
+
+    for field in REQUIRED_QUESTION_FIELDS:
+        if field not in q:
+            return f"缺少必要欄位：{field}"
+
+    if not isinstance(q["type"], str) or not q["type"].strip():
+        return "type 必須是非空字串"
+    if not isinstance(q["q"], str) or not q["q"].strip():
+        return "q 必須是非空字串"
+    if not isinstance(q["a"], str) or not q["a"].strip():
+        return "a 必須是非空字串"
+
+    opts = q["opts"]
+    if not isinstance(opts, list) or len(opts) != 4:
+        return "opts 必須是 4 個選項的陣列"
+    if not all(isinstance(o, str) for o in opts):
+        return "opts 必須全部為字串"
+    if len(set(opts)) != 4:
+        return "opts 有重複選項，4 個選項必須互不相同"
+    if q["a"] not in opts:
+        return "正確答案 a 不在 opts 選項中"
+    return None
+
+
+def _format_question_validation_error(diff, idx, defect):
+    """將 describe_question_defect 結果格式化為既有 validate_questions 錯誤訊息。"""
+    if defect == "不是物件（dict）":
+        return f"難度 {diff} 第 {idx} 題不是物件（dict）"
+    if defect.startswith("缺少必要欄位："):
+        field = defect.split("：", 1)[1]
+        return f"難度 {diff} 第 {idx} 題缺少必要欄位：{field}"
+    if defect in (
+        "type 必須是非空字串",
+        "q 必須是非空字串",
+        "a 必須是非空字串",
+        "opts 必須全部為字串",
+    ):
+        return f"難度 {diff} 第 {idx} 題的 {defect}"
+    if defect == "opts 必須是 4 個選項的陣列":
+        return f"難度 {diff} 第 {idx} 題的 opts 必須是 4 個選項的陣列"
+    if defect == "opts 有重複選項，4 個選項必須互不相同":
+        return f"難度 {diff} 第 {idx} 題的 opts 有重複選項，4 個選項必須互不相同"
+    if defect == "正確答案 a 不在 opts 選項中":
+        return f"難度 {diff} 第 {idx} 題的正確答案 a 不在 opts 選項中"
+    return f"難度 {diff} 第 {idx} 題：{defect}"
+
+
 def validate_questions(data):
     """驗證題庫結構是否符合 QB schema。
 
@@ -167,39 +227,147 @@ def validate_questions(data):
             )
 
         for idx, q in enumerate(questions):
-            if not isinstance(q, dict):
-                raise ValueError(f"難度 {diff} 第 {idx} 題不是物件（dict）")
-
-            for field in REQUIRED_QUESTION_FIELDS:
-                if field not in q:
-                    raise ValueError(
-                        f"難度 {diff} 第 {idx} 題缺少必要欄位：{field}"
-                    )
-
-            if not isinstance(q["type"], str) or not q["type"].strip():
-                raise ValueError(f"難度 {diff} 第 {idx} 題的 type 必須是非空字串")
-            if not isinstance(q["q"], str) or not q["q"].strip():
-                raise ValueError(f"難度 {diff} 第 {idx} 題的 q 必須是非空字串")
-            if not isinstance(q["a"], str) or not q["a"].strip():
-                raise ValueError(f"難度 {diff} 第 {idx} 題的 a 必須是非空字串")
-
-            opts = q["opts"]
-            if not isinstance(opts, list) or len(opts) != 4:
-                raise ValueError(
-                    f"難度 {diff} 第 {idx} 題的 opts 必須是 4 個選項的陣列"
-                )
-            if not all(isinstance(o, str) for o in opts):
-                raise ValueError(f"難度 {diff} 第 {idx} 題的 opts 必須全部為字串")
-            if len(set(opts)) != 4:
-                raise ValueError(
-                    f"難度 {diff} 第 {idx} 題的 opts 有重複選項，4 個選項必須互不相同"
-                )
-            if q["a"] not in opts:
-                raise ValueError(
-                    f"難度 {diff} 第 {idx} 題的正確答案 a 不在 opts 選項中"
-                )
+            defect = describe_question_defect(q)
+            if defect:
+                raise ValueError(_format_question_validation_error(diff, idx, defect))
 
     return True
+
+
+def log_structured(level, msg, ctx):
+    """輸出結構化 JSON log（對齊 CLAUDE.md Logging 格式）。"""
+    print(
+        json.dumps(
+            {
+                "level": level,
+                "ts": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                "msg": msg,
+                "ctx": ctx,
+            },
+            ensure_ascii=False,
+        ),
+        file=sys.stderr,
+    )
+
+
+def filter_valid_generated_questions(data):
+    """逐題驗證新生成題庫，排除無效題並回傳 (filtered, exclusions)。
+
+    不強制每個難度達 MIN_PER_DIFFICULTY（那是 merge 後整批 validation 的責任）。
+    exclusions 每筆為 {"difficulty", "index", "reason"}。
+    最外層非 dict、或缺必要難度 key 時 raise ValueError
+    （整份回應結構崩壞／schema 缺欄，無法部分接受；present 空陣列可接受）。
+    """
+    if not isinstance(data, dict):
+        raise ValueError("題庫最外層必須是物件（dict）")
+
+    filtered = {}
+    exclusions = []
+    for diff in DIFFICULTIES:
+        # absent key ≠ present []：缺 key 視為 top-level schema 錯誤，直接拒絕。
+        if diff not in data:
+            raise ValueError(f"題庫缺少必要難度欄位：{diff}")
+        raw = data[diff]
+        if not isinstance(raw, list):
+            exclusions.append(
+                {
+                    "difficulty": diff,
+                    "index": -1,
+                    "reason": f"難度 {diff} 的值必須是陣列（list）",
+                }
+            )
+            filtered[diff] = []
+            continue
+
+        kept = []
+        for idx, q in enumerate(raw):
+            defect = describe_question_defect(q)
+            if defect:
+                exclusions.append(
+                    {
+                        "difficulty": diff,
+                        "index": idx,
+                        "reason": _format_question_validation_error(diff, idx, defect),
+                    }
+                )
+                continue
+            kept.append(q)
+        filtered[diff] = kept
+    return filtered, exclusions
+
+
+def count_newly_added(existing, merged):
+    """計算 merge 後實際新增題數（survived dedupe／quota／跨難度去重）。"""
+    before = set()
+    for diff in DIFFICULTIES:
+        qs = existing.get(diff) if isinstance(existing.get(diff), list) else []
+        for q in qs:
+            if isinstance(q, dict) and isinstance(q.get("q"), str):
+                key = normalize_question_text(q["q"])
+                if key:
+                    before.add(key)
+
+    added = 0
+    for diff in DIFFICULTIES:
+        qs = merged.get(diff) if isinstance(merged.get(diff), list) else []
+        for q in qs:
+            if isinstance(q, dict) and isinstance(q.get("q"), str):
+                key = normalize_question_text(q["q"])
+                if key and key not in before:
+                    before.add(key)
+                    added += 1
+    return added
+
+
+def process_generated_questions(existing, new_data):
+    """部分接受新題 → merge → 以實際新增數做門檻檢查 → 嚴格整批驗證。
+
+    回傳 (merged, accepted_count)；accepted_count 為 merge 後實際新增題數。
+    實際新增低於 MIN_VALID_NEW_QUESTIONS、或 merge 後整批不合法時 raise ValueError。
+    被排除題目會以結構化 warn log 記錄數量與原因；門檻失敗會 emit error log。
+    """
+    accepted, exclusions = filter_valid_generated_questions(new_data)
+    schema_valid_count = sum(len(accepted[d]) for d in DIFFICULTIES)
+
+    if exclusions:
+        log_structured(
+            "warn",
+            "排除無效的新生成題目",
+            {
+                "excluded_count": len(exclusions),
+                "accepted_count": schema_valid_count,
+                "reasons": [
+                    {
+                        "difficulty": e["difficulty"],
+                        "index": e["index"],
+                        "reason": e["reason"],
+                    }
+                    for e in exclusions
+                ],
+            },
+        )
+
+    merged = merge_question_banks(existing, accepted)
+    accepted_count = count_newly_added(existing, merged)
+
+    if accepted_count < MIN_VALID_NEW_QUESTIONS:
+        log_structured(
+            "error",
+            "有效新題數低於最低有效題數門檻",
+            {
+                "accepted_count": accepted_count,
+                "required_count": MIN_VALID_NEW_QUESTIONS,
+                "excluded_count": len(exclusions),
+                "schema_valid_count": schema_valid_count,
+            },
+        )
+        raise ValueError(
+            f"有效新題數低於最低有效題數門檻：需要至少 {MIN_VALID_NEW_QUESTIONS} 題，"
+            f"實際 {accepted_count} 題（已排除 {len(exclusions)} 題）"
+        )
+
+    validate_questions(merged)
+    return merged, accepted_count
 
 
 # NFKC 折疊後仍殘留的 CJK 標點 → ASCII 對映。NFKC 已處理全形英數與
@@ -264,17 +432,7 @@ def load_existing_bank(path):
 
 def _is_mergeable_question(q):
     """merge 用的單題健全性檢查（與 validate_questions 的單題規則一致）。"""
-    return (
-        isinstance(q, dict)
-        and all(field in q for field in REQUIRED_QUESTION_FIELDS)
-        and isinstance(q.get("type"), str) and q["type"].strip()
-        and isinstance(q.get("q"), str) and q["q"].strip()
-        and isinstance(q.get("a"), str) and q["a"].strip()
-        and isinstance(q.get("opts"), list) and len(q["opts"]) == 4
-        and all(isinstance(o, str) for o in q["opts"])
-        and len(set(q["opts"])) == 4
-        and q["a"] in q["opts"]
-    )
+    return describe_question_defect(q) is None
 
 
 def merge_question_banks(existing, new):
@@ -341,9 +499,8 @@ def main():
         existing = load_existing_bank(OUTPUT_PATH)
         raw_text = call_gemini(api_key, compute_type_counts(existing))
         new_data = parse_response_text(raw_text)
-        validate_questions(new_data)
-        merged = merge_question_banks(existing, new_data)
-        validate_questions(merged)
+        # 逐題部分接受：無效題排除並記錄；低於門檻或 merge 後不合法則失敗，不寫檔。
+        merged, accepted_count = process_generated_questions(existing, new_data)
     except Exception as exc:  # noqa: BLE001 - 任何失敗都需明確中止
         print(f"題庫產生失敗，不更新 questions.json：{exc}", file=sys.stderr)
         sys.exit(1)
@@ -356,9 +513,11 @@ def main():
         print(f"寫入 questions.json 失敗：{exc}", file=sys.stderr)
         sys.exit(1)
 
-    new_total = sum(len(new_data[d]) for d in DIFFICULTIES)
     total = sum(len(merged[d]) for d in DIFFICULTIES)
-    print(f"已成功更新 questions.json：本次新增候選 {new_total} 題，合併後共 {total} 題。")
+    print(
+        f"已成功更新 questions.json：本次接受有效新題 {accepted_count} 題，"
+        f"合併後共 {total} 題。"
+    )
 
 
 if __name__ == "__main__":
