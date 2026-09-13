@@ -13,7 +13,10 @@ import copy
 import inspect
 import io
 import json
+import sys
+import types as stdlib_types
 import unittest
+from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
 from generate_questions import (
@@ -503,6 +506,40 @@ class TestPartialAcceptance(unittest.TestCase):
         self.assertEqual(error_records[0]["ctx"]["accepted_count"], 0)
 
 
+@contextmanager
+def _stub_google_genai(mock_client_cls=None):
+    """注入假 google.genai 模組，讓 call_gemini 在未安裝 SDK 時仍可測。
+
+    unittest.mock.patch('google.genai.Client') 會先真實 import target，
+    CI 的 python-tests job 不裝 google-genai，因此改用 sys.modules stub。
+    """
+    if mock_client_cls is None:
+        mock_client_cls = MagicMock(name="Client")
+
+    google_mod = stdlib_types.ModuleType("google")
+    genai_mod = stdlib_types.ModuleType("google.genai")
+    types_mod = stdlib_types.ModuleType("google.genai.types")
+
+    class GenerateContentConfig:
+        def __init__(self, response_mime_type=None, **_kwargs):
+            self.response_mime_type = response_mime_type
+
+    types_mod.GenerateContentConfig = GenerateContentConfig
+    genai_mod.Client = mock_client_cls
+    genai_mod.types = types_mod
+    google_mod.genai = genai_mod
+
+    with patch.dict(
+        sys.modules,
+        {
+            "google": google_mod,
+            "google.genai": genai_mod,
+            "google.genai.types": types_mod,
+        },
+    ):
+        yield mock_client_cls
+
+
 class TestCallGemini(unittest.TestCase):
     """SDK adapter boundary：mock google.genai，不發真實網路請求。"""
 
@@ -515,54 +552,54 @@ class TestCallGemini(unittest.TestCase):
         response.candidates = [candidate]
         return response
 
-    @patch("google.genai.Client")
-    def test_returns_text_via_candidates_path(self, mock_client_cls):
-        mock_client = mock_client_cls.return_value
-        mock_client.models.generate_content.return_value = self._mock_response(
-            '{"hard":[]}'
-        )
+    def test_returns_text_via_candidates_path(self):
+        with _stub_google_genai() as mock_client_cls:
+            mock_client = mock_client_cls.return_value
+            mock_client.models.generate_content.return_value = self._mock_response(
+                '{"hard":[]}'
+            )
 
-        result = call_gemini("test-api-key")
+            result = call_gemini("test-api-key")
 
-        self.assertEqual(result, '{"hard":[]}')
-        mock_client_cls.assert_called_once_with(api_key="test-api-key")
-        kwargs = mock_client.models.generate_content.call_args.kwargs
-        self.assertEqual(kwargs["model"], MODEL_NAME)
-        self.assertEqual(kwargs["contents"], build_prompt(None))
-        self.assertEqual(kwargs["config"].response_mime_type, "application/json")
+            self.assertEqual(result, '{"hard":[]}')
+            mock_client_cls.assert_called_once_with(api_key="test-api-key")
+            kwargs = mock_client.models.generate_content.call_args.kwargs
+            self.assertEqual(kwargs["model"], MODEL_NAME)
+            self.assertEqual(kwargs["contents"], build_prompt(None))
+            self.assertEqual(kwargs["config"].response_mime_type, "application/json")
 
-    @patch("google.genai.Client")
-    def test_passes_type_counts_into_prompt(self, mock_client_cls):
-        mock_client = mock_client_cls.return_value
-        mock_client.models.generate_content.return_value = self._mock_response("{}")
-        type_counts = {d: {"計算": 1} for d in DIFFICULTIES}
+    def test_passes_type_counts_into_prompt(self):
+        with _stub_google_genai() as mock_client_cls:
+            mock_client = mock_client_cls.return_value
+            mock_client.models.generate_content.return_value = self._mock_response("{}")
+            type_counts = {d: {"計算": 1} for d in DIFFICULTIES}
 
-        call_gemini("k", type_counts)
+            call_gemini("k", type_counts)
 
-        kwargs = mock_client.models.generate_content.call_args.kwargs
-        self.assertEqual(kwargs["contents"], build_prompt(type_counts))
+            kwargs = mock_client.models.generate_content.call_args.kwargs
+            self.assertEqual(kwargs["contents"], build_prompt(type_counts))
 
-    @patch("google.genai.Client")
-    def test_missing_candidates_raises_value_error(self, mock_client_cls):
-        mock_client = mock_client_cls.return_value
-        response = MagicMock()
-        response.candidates = None
-        mock_client.models.generate_content.return_value = response
+    def test_missing_candidates_raises_value_error(self):
+        with _stub_google_genai() as mock_client_cls:
+            mock_client = mock_client_cls.return_value
+            response = MagicMock()
+            response.candidates = None
+            mock_client.models.generate_content.return_value = response
 
-        with self.assertRaises(ValueError) as ctx:
-            call_gemini("k")
-        self.assertIn("無法從 Gemini 回應取得內容", str(ctx.exception))
+            with self.assertRaises(ValueError) as ctx:
+                call_gemini("k")
+            self.assertIn("無法從 Gemini 回應取得內容", str(ctx.exception))
 
-    @patch("google.genai.Client")
-    def test_empty_candidates_raises_value_error(self, mock_client_cls):
-        mock_client = mock_client_cls.return_value
-        response = MagicMock()
-        response.candidates = []
-        mock_client.models.generate_content.return_value = response
+    def test_empty_candidates_raises_value_error(self):
+        with _stub_google_genai() as mock_client_cls:
+            mock_client = mock_client_cls.return_value
+            response = MagicMock()
+            response.candidates = []
+            mock_client.models.generate_content.return_value = response
 
-        with self.assertRaises(ValueError) as ctx:
-            call_gemini("k")
-        self.assertIn("無法從 Gemini 回應取得內容", str(ctx.exception))
+            with self.assertRaises(ValueError) as ctx:
+                call_gemini("k")
+            self.assertIn("無法從 Gemini 回應取得內容", str(ctx.exception))
 
     def test_source_uses_google_genai_not_deprecated_sdk(self):
         source = inspect.getsource(call_gemini)
