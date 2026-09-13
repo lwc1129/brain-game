@@ -10,17 +10,21 @@
 """
 
 import copy
+import inspect
 import io
 import json
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from generate_questions import (
     DIFFICULTIES,
     MAX_PER_DIFFICULTY,
     MIN_PER_DIFFICULTY,
     MIN_VALID_NEW_QUESTIONS,
+    MODEL_NAME,
     TYPE_CAP,
+    build_prompt,
+    call_gemini,
     compute_type_counts,
     filter_valid_generated_questions,
     merge_question_banks,
@@ -497,6 +501,76 @@ class TestPartialAcceptance(unittest.TestCase):
         ]
         error_records = [r for r in error_records if r.get("level") == "error"]
         self.assertEqual(error_records[0]["ctx"]["accepted_count"], 0)
+
+
+class TestCallGemini(unittest.TestCase):
+    """SDK adapter boundary：mock google.genai，不發真實網路請求。"""
+
+    def _mock_response(self, text):
+        part = MagicMock()
+        part.text = text
+        candidate = MagicMock()
+        candidate.content.parts = [part]
+        response = MagicMock()
+        response.candidates = [candidate]
+        return response
+
+    @patch("google.genai.Client")
+    def test_returns_text_via_candidates_path(self, mock_client_cls):
+        mock_client = mock_client_cls.return_value
+        mock_client.models.generate_content.return_value = self._mock_response(
+            '{"hard":[]}'
+        )
+
+        result = call_gemini("test-api-key")
+
+        self.assertEqual(result, '{"hard":[]}')
+        mock_client_cls.assert_called_once_with(api_key="test-api-key")
+        kwargs = mock_client.models.generate_content.call_args.kwargs
+        self.assertEqual(kwargs["model"], MODEL_NAME)
+        self.assertEqual(kwargs["contents"], build_prompt(None))
+        self.assertEqual(kwargs["config"].response_mime_type, "application/json")
+
+    @patch("google.genai.Client")
+    def test_passes_type_counts_into_prompt(self, mock_client_cls):
+        mock_client = mock_client_cls.return_value
+        mock_client.models.generate_content.return_value = self._mock_response("{}")
+        type_counts = {d: {"計算": 1} for d in DIFFICULTIES}
+
+        call_gemini("k", type_counts)
+
+        kwargs = mock_client.models.generate_content.call_args.kwargs
+        self.assertEqual(kwargs["contents"], build_prompt(type_counts))
+
+    @patch("google.genai.Client")
+    def test_missing_candidates_raises_value_error(self, mock_client_cls):
+        mock_client = mock_client_cls.return_value
+        response = MagicMock()
+        response.candidates = None
+        mock_client.models.generate_content.return_value = response
+
+        with self.assertRaises(ValueError) as ctx:
+            call_gemini("k")
+        self.assertIn("無法從 Gemini 回應取得內容", str(ctx.exception))
+
+    @patch("google.genai.Client")
+    def test_empty_candidates_raises_value_error(self, mock_client_cls):
+        mock_client = mock_client_cls.return_value
+        response = MagicMock()
+        response.candidates = []
+        mock_client.models.generate_content.return_value = response
+
+        with self.assertRaises(ValueError) as ctx:
+            call_gemini("k")
+        self.assertIn("無法從 Gemini 回應取得內容", str(ctx.exception))
+
+    def test_source_uses_google_genai_not_deprecated_sdk(self):
+        source = inspect.getsource(call_gemini)
+        self.assertNotIn("google.generativeai", source)
+        self.assertIn("from google import genai", source)
+        self.assertIn("genai.Client", source)
+        self.assertIn("response_mime_type", source)
+        self.assertIn("candidates[0].content.parts[0].text", source)
 
 
 class TestRebalance(unittest.TestCase):

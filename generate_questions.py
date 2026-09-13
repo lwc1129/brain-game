@@ -472,20 +472,26 @@ def merge_question_banks(existing, new):
 def call_gemini(api_key, type_counts=None):
     """呼叫 Gemini API，回傳文字內容。
 
-    依規格使用回傳路徑 response.candidates[0].content.parts[0].text。
+    使用官方支援的 google-genai（`google.genai`）SDK。
+    依規格使用回傳路徑 response.candidates[0].content.parts[0].text，
+    與舊 SDK 的解析契約保持一致；不依賴 response.text 捷徑。
     """
-    import google.generativeai as genai
+    from google import genai
+    from google.genai import types
 
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel(MODEL_NAME)
-    response = model.generate_content(
-        build_prompt(type_counts),
-        generation_config={"response_mime_type": "application/json"},
+    client = genai.Client(api_key=api_key)
+    response = client.models.generate_content(
+        model=MODEL_NAME,
+        contents=build_prompt(type_counts),
+        config=types.GenerateContentConfig(
+            response_mime_type="application/json",
+        ),
     )
 
     try:
         return response.candidates[0].content.parts[0].text
-    except (AttributeError, IndexError, KeyError) as exc:
+    except (AttributeError, IndexError, KeyError, TypeError) as exc:
+        # TypeError：新 SDK 在 candidates 為 None 時下標會觸發（舊 SDK 多為空列表）。
         raise ValueError(f"無法從 Gemini 回應取得內容：{exc}") from exc
 
 
