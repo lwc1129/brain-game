@@ -38,7 +38,16 @@ describe('notify-slack-failure.yml', () => {
 
   test('notify-slack-failure：沿用 SLACK_WEBHOOK_URL 與 curl POST pattern', () => {
     assert.match(yml, /secrets\.SLACK_WEBHOOK_URL/);
-    assert.match(yml, /curl -sf -X POST "\$SLACK_WEBHOOK_URL"/);
+    assert.match(yml, /curl -sf --max-time 15 -X POST "\$SLACK_WEBHOOK_URL"/);
+  });
+
+  test('notify-slack-failure：curl 設有限 --max-time，失敗仍 warn + exit 0', () => {
+    assert.match(yml, /--max-time 15/);
+    assert.match(yml, /SLACK_CURL_MAX_TIME_SECONDS/);
+    assert.match(yml, /set \+e/);
+    assert.match(yml, /CURL_EXIT/);
+    assert.match(yml, /original workflow failure is unchanged/);
+    assert.match(yml, /exit 0\s*$/m);
   });
 
   test('notify-slack-failure：notification 失敗時仍 exit 0（不掩蓋 root cause）', () => {
@@ -74,6 +83,14 @@ describe('update_questions.yml failure notification', () => {
     const notifyBlock = yml.slice(yml.indexOf('notify-failure:'));
     assert.doesNotMatch(notifyBlock, /if:\s*always\(\)\s*$/m);
     assert.match(notifyBlock, /contains\(needs\.\*\.result, 'failure'\)/);
+  });
+
+  test('update_questions：notify commit_sha 優先 new_sha，否則 fallback github.sha', () => {
+    const notifyBlock = yml.slice(yml.indexOf('notify-failure:'));
+    assert.match(
+      notifyBlock,
+      /commit_sha:\s*\$\{\{\s*needs\.commit\.outputs\.new_sha\s*\|\|\s*github\.sha\s*\}\}/
+    );
   });
 });
 

@@ -115,7 +115,8 @@ jobs:
             }')"
 
           echo "Notification payload fields: workflow, result, branch, commit, run_url, timestamp"
-          curl -sf -X POST "$SLACK_WEBHOOK_URL" \
+          # SLACK_CURL_MAX_TIME_SECONDS = 15：有限 timeout，避免 webhook 卡住拖到 job timeout
+          curl -sf --max-time 15 -X POST "$SLACK_WEBHOOK_URL" \
             -H "content-type: application/json" \
             -d "$PAYLOAD"
           CURL_EXIT=$?
