@@ -1,0 +1,5 @@
+# Pinned dependency for weekly question-bank generation (generate_questions.py).
+# Install: pip install -r requirements-generate.txt
+# Successor to deprecated google-generativeai; keep in sync with
+# .github/workflows/update_questions.yml.
+google-genai==2.23.0
