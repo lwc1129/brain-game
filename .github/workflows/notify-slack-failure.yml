@@ -1,0 +1,128 @@
+# 失敗通知（Slack）— 供題庫更新／部署 workflow 在 failure path 呼叫。
+# 亦可 workflow_dispatch 手動驗證，不觸碰 production generate／deploy 邏輯。
+#
+# Isolation：此 workflow 的 notify step 一律以 exit 0 結束（Slack／secret 缺失
+# 只發 warning），避免 notification 失敗掩蓋呼叫端的真正 root cause。
+
+name: Notify Slack Failure
+
+on:
+  workflow_call:
+    inputs:
+      workflow_name:
+        description: 失敗的 workflow 名稱
+        type: string
+        required: true
+      result:
+        description: 結果／狀態（通常為 failure）
+        type: string
+        required: false
+        default: failure
+      branch:
+        description: 分支名稱
+        type: string
+        required: false
+        default: ''
+      commit_sha:
+        description: Commit SHA
+        type: string
+        required: false
+        default: ''
+      run_url:
+        description: GitHub Actions run URL
+        type: string
+        required: false
+        default: ''
+  workflow_dispatch:
+    inputs:
+      workflow_name:
+        description: 模擬的 workflow 名稱（測試用）
+        type: string
+        required: false
+        default: manual-notify-test
+      result:
+        description: 模擬的 result／status
+        type: string
+        required: false
+        default: failure
+      branch:
+        description: 分支（空白則用觸發分支）
+        type: string
+        required: false
+        default: ''
+      commit_sha:
+        description: Commit SHA（空白則用觸發 SHA）
+        type: string
+        required: false
+        default: ''
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Slack failure notification
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          WORKFLOW_NAME: ${{ inputs.workflow_name }}
+          RESULT: ${{ inputs.result }}
+          BRANCH_INPUT: ${{ inputs.branch }}
+          COMMIT_SHA_INPUT: ${{ inputs.commit_sha }}
+          RUN_URL_INPUT: ${{ inputs.run_url }}
+          FALLBACK_BRANCH: ${{ github.ref_name }}
+          FALLBACK_SHA: ${{ github.sha }}
+          FALLBACK_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set +e
+          TIMESTAMP="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+          BRANCH="${BRANCH_INPUT:-$FALLBACK_BRANCH}"
+          COMMIT_SHA="${COMMIT_SHA_INPUT:-$FALLBACK_SHA}"
+          RUN_URL="${RUN_URL_INPUT:-$FALLBACK_RUN_URL}"
+          WORKFLOW_NAME="${WORKFLOW_NAME:-unknown-workflow}"
+          RESULT="${RESULT:-failure}"
+
+          echo "Preparing failure notification:"
+          echo "  workflow=$WORKFLOW_NAME"
+          echo "  result=$RESULT"
+          echo "  branch=$BRANCH"
+          echo "  commit=$COMMIT_SHA"
+          echo "  run_url=$RUN_URL"
+          echo "  timestamp=$TIMESTAMP"
+
+          if [ -z "$SLACK_WEBHOOK_URL" ]; then
+            echo "::warning::SLACK_WEBHOOK_URL is not set; skipping Slack failure notification"
+            exit 0
+          fi
+
+          # 沿用 ai-pr-review.yml 的 Incoming Webhook + curl -sf 模式；
+          # 以 jq 組 JSON，避免特殊字元弄壞 payload。
+          PAYLOAD="$(jq -n \
+            --arg workflow "$WORKFLOW_NAME" \
+            --arg result "$RESULT" \
+            --arg branch "$BRANCH" \
+            --arg commit "$COMMIT_SHA" \
+            --arg run_url "$RUN_URL" \
+            --arg ts "$TIMESTAMP" \
+            '{
+              text: (
+                "🚨 Workflow failure\n" +
+                "*Workflow*: `\($workflow)`\n" +
+                "*Result*: `\($result)`\n" +
+                "*Branch*: `\($branch)`\n" +
+                "*Commit*: `\($commit)`\n" +
+                "*Run*: <\($run_url)|Open Actions run>\n" +
+                "*Timestamp*: `\($ts)`"
+              )
+            }')"
+
+          echo "Notification payload fields: workflow, result, branch, commit, run_url, timestamp"
+          curl -sf -X POST "$SLACK_WEBHOOK_URL" \
+            -H "content-type: application/json" \
+            -d "$PAYLOAD"
+          CURL_EXIT=$?
+          if [ "$CURL_EXIT" -ne 0 ]; then
+            echo "::warning::Slack failure notification request failed (exit=${CURL_EXIT}); original workflow failure is unchanged"
+          else
+            echo "Slack failure notification sent."
+          fi
+          # 永遠 exit 0：notification 失敗不得新增第二個 failure、不得掩蓋 root cause。
+          exit 0
