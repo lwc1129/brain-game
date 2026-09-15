@@ -153,3 +153,19 @@ jobs:
           done
           echo "Production questions.json 在時限內未與 repository 一致。"
           exit 1
+
+  # Failure-only Slack 通知。成功路徑不執行。
+  # always() + contains(failure) 可在部分 job 被 skip（無變更）時仍正確觸發。
+  # notification 本身失敗不會掩蓋 generate／validate／deploy 的原始錯誤（見 notify-slack-failure.yml）。
+  notify-failure:
+    needs: [generate, validate, commit, deploy, verify-production]
+    if: always() && contains(needs.*.result, 'failure')
+    uses: ./.github/workflows/notify-slack-failure.yml
+    secrets: inherit
+    with:
+      workflow_name: ${{ github.workflow }}
+      result: failure
+      branch: ${{ github.ref_name }}
+      # commit 已 push 新題庫時用 new_sha；否則（generate／validate 失敗或無變更）fallback github.sha
+      commit_sha: ${{ needs.commit.outputs.new_sha || github.sha }}
+      run_url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

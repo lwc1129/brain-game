@@ -69,3 +69,18 @@ jobs:
 
       - uses: actions/deploy-pages@v4
         id: deployment
+
+  # Failure-only Slack 通知。成功路徑不執行。
+  # notification 本身失敗不會掩蓋 deploy job 的原始錯誤（見 notify-slack-failure.yml）。
+  notify-failure:
+    needs: [deploy]
+    if: failure()
+    uses: ./.github/workflows/notify-slack-failure.yml
+    secrets: inherit
+    with:
+      # workflow_call 時 github.workflow 會是呼叫端名稱；固定標示本檔部署流程。
+      workflow_name: Deploy to GitHub Pages
+      result: failure
+      branch: ${{ github.ref_name }}
+      commit_sha: ${{ inputs.ref || github.sha }}
+      run_url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
