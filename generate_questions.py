@@ -97,6 +97,35 @@ def build_prompt(type_counts=None):
             f"請優先產生數量最少的題型：{'、'.join(rarest)}。\n\n"
         )
 
+    # Difficulty contract from Issue #37 rubric (Issue #46 calibration).
+    # Dimensions: S steps, WM working memory, R reasoning, C calculation,
+    # P pattern, D distraction, INT instant-answer override.
+    difficulty_contract = (
+        "5. 難度必須依下列認知負荷契約分級（Issue #37 rubric），不可只靠題材冷門度：\n"
+        "   維度：S 解題步驟(0直接辨識/1單步/2兩步/3≥三步)；"
+        "WM 工作記憶(0≤2項/1=3-4/2=5-6/3≥7)；"
+        "R 推理鏈(0無/1單一推論/2兩段/3多段或反證)；"
+        "C 計算(0無/1個位加減/2兩位加減進位或九九/3多步混合乘除百分比)；"
+        "P 模式(0無/1連續整數或明顯等差/2需推導間距/3非等差)；"
+        "D 干擾(0無/1選項近似/2題幹含無關資訊/3兩者)。\n"
+        "   INT 覆寫：若屬直覺秒答（無步驟、無推理、純常識回憶），"
+        "無論題材多冷僻都只能放 super_easy，禁止因冷門把常識放進 medium/hard。\n"
+        "   - super_easy：S≤1、WM≤4、R=0、C≤1、P≤1；多屬直覺可答。"
+        "正例：個位加法「2+5=?」；4 項順序回憶；「兔子最愛吃什麼？」。"
+        "反例：兩步日期推理；需推導間距的等差數列。\n"
+        "   - easy：S=1-2、WM≤5、R≤1、C≤2、P≤1。"
+        "正例：兩位數加減進位；5 項順序回憶；明顯等差-2 數列；odd-one-out 分類。"
+        "反例：直覺常識秒答（應降為 super_easy）；6 項回憶或需推導間距（應升 medium）。\n"
+        "   - medium：最低認知負荷——至少兩步處理，或 WM≈6，或中等模式推導"
+        "（S=2-3、WM=6、R=1-2、C=2-3、P=2 之一級以上）。"
+        "正例：兩位數×個位含進位；6 項順序回憶；「前天是星期二，大後天是星期幾？」；"
+        "需先算公差的數列。"
+        "反例：純常識體溫／吉祥話；整十簡單乘法無負荷；連續整數數列。\n"
+        "   - hard：必須符合 S≥3 或 R≥2 或 C=3 或 P=3 或 WM≥7 至少一項。"
+        "正例：≥7 項回憶；多步混合運算；非等差／遞迴數列；需反證的條件邏輯。"
+        "反例：單步分類；僅表面用難詞的常識題；只有兩步日期卻無其他高負荷。\n"
+    )
+
     return (
         "你是一位繁體中文的認知訓練題庫設計師，服務對象為銀髮族。\n"
         "請產生一份適合每日腦力挑戰的題庫，主題可包含："
@@ -112,8 +141,8 @@ def build_prompt(type_counts=None):
         "   - q：題目敘述（字串，繁體中文，結尾用全形問號）\n"
         "   - a：正確答案（字串）\n"
         "   - opts：4 個選項的陣列（字串陣列），互不相同，且 a 必須是 opts 其中之一\n"
-        "5. 難度需明顯區隔：super_easy 給認知退化者，hard 需要較多思考。\n"
-        "6. 全部使用繁體中文。\n\n"
+        + difficulty_contract
+        + "6. 全部使用繁體中文。\n\n"
         "回傳格式範例（僅示意結構，內容請自行產生）：\n"
         + json.dumps(schema_example, ensure_ascii=False, indent=2)
         + "\n\n只回傳純JSON物件，不要有任何其他文字或markdown。"
