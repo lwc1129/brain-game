@@ -19,3 +19,12 @@ Eval-only tooling for before/after difficulty prompt calibration.
 ## Local dry-run (no Gemini)
 
 Unit tests cover blinding / reporting / prompt contracts. Generation requires `GEMINI_API_KEY` and should be run via the eval workflow.
+
+## GitHub Actions note
+
+`workflow_dispatch` only works after this workflow file exists on the **default branch**. Until then, `gh workflow run difficulty-eval.yml` returns 404. After merge to `main`:
+
+```bash
+gh workflow run difficulty-eval.yml --ref main \
+  -f runs_per_version=4 -f min_per_difficulty=30
+```
