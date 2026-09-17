@@ -11,10 +11,11 @@ Eval-only tooling for before/after difficulty prompt calibration.
 
 ## Flow
 
-1. **Generate** (GHA): old prompt + calibrated prompt, same model / type_counts / call settings, ≥3 runs, ≥30 questions per difficulty per version → `eval_output/`
-2. **Blind**: shuffle, strip version, assign anonymous IDs → `blind/pack.json` + `blind/key.json`
-3. **Rate**: fill `rating_sheet.csv` or run `python -m eval.rate_blind --pack ... --out ...` **without reading key.json**
-4. **Unblind + report**: `python -m eval.unblind_report --eval-dir eval_output --ratings ...`
+1. **Generate** (GHA): old prompt + calibrated prompt, same model / type_counts / call settings, ≥3 runs; transient Gemini 429/5xx retries stay inside the same run
+2. **Pool + balanced sample**: dedupe pooled questions, then deterministically pick exactly `min_per_difficulty` per version×difficulty (blind seed); insufficient pool fails — never use raw model output counts as sample size
+3. **Blind**: shuffle sampled items, strip version, assign anonymous IDs → `blind/pack.json` + `blind/key.json`
+4. **Rate**: fill `rating_sheet.csv` or run `python -m eval.rate_blind --pack ... --out ...` **without reading key.json**
+5. **Unblind + report**: `python -m eval.unblind_report --eval-dir eval_output --ratings ...`
 
 ## Local dry-run (no Gemini)
 

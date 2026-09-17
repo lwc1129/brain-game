@@ -9,10 +9,13 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import random
+import re
 import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Callable
 
 _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
@@ -36,9 +39,45 @@ from eval.report import DEFAULT_MIN_PER_DIFFICULTY  # noqa: E402
 DEFAULT_RUNS = 4
 DEFAULT_BLIND_SEED = 20260916
 
+# Transient Gemini HTTP statuses eligible for bounded retry (same generation run).
+TRANSIENT_HTTP_STATUSES = frozenset({429, 500, 502, 503, 504})
+# Max additional attempts after the first failure (not new independent runs).
+GEMINI_TRANSIENT_MAX_RETRIES = 3
+# Exponential backoff: base * 2^attempt → 1s, 2s, 4s for attempts 0..2.
+GEMINI_RETRY_BASE_DELAY_S = 1.0
 
-def call_gemini_with_prompt(api_key: str, prompt: str) -> str:
-    """Same SDK path / model / mime type as production call_gemini."""
+
+def extract_http_status(exc: BaseException) -> int | None:
+    """Best-effort HTTP status from google-genai / httpx-style errors."""
+    for attr in ("code", "status_code", "status"):
+        val = getattr(exc, attr, None)
+        if isinstance(val, int) and 100 <= val <= 599:
+            return val
+        if isinstance(val, str) and val.isdigit():
+            code = int(val)
+            if 100 <= code <= 599:
+                return code
+    # Nested response objects (e.g. exc.response.status_code).
+    resp = getattr(exc, "response", None)
+    if resp is not None:
+        for attr in ("status_code", "status", "code"):
+            val = getattr(resp, attr, None)
+            if isinstance(val, int) and 100 <= val <= 599:
+                return val
+    match = re.search(r"\b([45]\d{2})\b", str(exc))
+    if match:
+        return int(match.group(1))
+    return None
+
+
+def is_transient_gemini_error(exc: BaseException) -> bool:
+    """True only for retryable HTTP statuses (429/5xx listed)."""
+    status = extract_http_status(exc)
+    return status in TRANSIENT_HTTP_STATUSES
+
+
+def call_gemini_once(api_key: str, prompt: str) -> str:
+    """Single SDK call — same path / model / mime type as production call_gemini."""
     from google import genai
     from google.genai import types
 
@@ -56,6 +95,44 @@ def call_gemini_with_prompt(api_key: str, prompt: str) -> str:
         raise ValueError(f"無法從 Gemini 回應取得內容：{exc}") from exc
 
 
+def call_gemini_with_prompt(
+    api_key: str,
+    prompt: str,
+    *,
+    max_retries: int = GEMINI_TRANSIENT_MAX_RETRIES,
+    base_delay_s: float = GEMINI_RETRY_BASE_DELAY_S,
+    sleep_fn: Callable[[float], None] = time.sleep,
+    call_fn: Callable[[str, str], str] | None = None,
+) -> str:
+    """Call Gemini with bounded exponential backoff on transient HTTP errors.
+
+    Retries stay inside the same generation run (do not create a new run index).
+    Non-transient errors fail immediately without retry.
+    """
+    do_call = call_fn or call_gemini_once
+    attempt = 0
+    while True:
+        try:
+            return do_call(api_key, prompt)
+        except Exception as exc:  # noqa: BLE001
+            if not is_transient_gemini_error(exc) or attempt >= max_retries:
+                raise
+            delay = base_delay_s * (2**attempt)
+            log_structured(
+                "warn",
+                "eval Gemini transient error; retrying",
+                {
+                    "attempt": attempt + 1,
+                    "max_retries": max_retries,
+                    "delay_s": delay,
+                    "status": extract_http_status(exc),
+                    "error": str(exc),
+                },
+            )
+            sleep_fn(delay)
+            attempt += 1
+
+
 def pool_questions(runs: list[dict]) -> dict[str, list]:
     """Merge valid questions across runs; dedupe by normalized q within difficulty."""
     pooled = {d: [] for d in DIFFICULTIES}
@@ -70,6 +147,42 @@ def pool_questions(runs: list[dict]) -> dict[str, list]:
                 seen[diff].add(key)
                 pooled[diff].append(q)
     return pooled
+
+
+def require_positive_min_n(min_n: int) -> None:
+    """Reject nonpositive balanced sample sizes before pool assert / slicing.
+
+    min_n=0 → empty slice; negative → Python reverse-index slice. Both would
+    otherwise let generation exit successfully with a useless blind pack.
+    """
+    if type(min_n) is not int or min_n < 1:
+        raise SystemExit(
+            f"min_per_difficulty 必須為正整數（≥1），收到：{min_n!r}"
+        )
+
+
+def sample_balanced(
+    pooled: dict[str, list],
+    *,
+    min_n: int,
+    seed: int,
+    version: str,
+) -> dict[str, list]:
+    """Deterministically select exactly min_n questions per difficulty.
+
+    Uses configured blind/eval seed — never the raw model output count.
+    Raises SystemExit when min_n is not a positive int, or when any difficulty
+    has fewer than min_n pooled items.
+    """
+    require_positive_min_n(min_n)
+    assert_sample_size(pooled, min_n, version)
+    sampled: dict[str, list] = {}
+    for diff in DIFFICULTIES:
+        items = list(pooled.get(diff) or [])
+        rng = random.Random(f"{seed}|{version}|{diff}")
+        rng.shuffle(items)
+        sampled[diff] = items[:min_n]
+    return sampled
 
 
 def generate_version(
@@ -146,6 +259,9 @@ def assert_sample_size(pooled: dict[str, list], min_n: int, version: str) -> Non
 
 
 def run_generation(args: argparse.Namespace) -> Path:
+    # Fail before Gemini spend when workflow_dispatch passes min_per_difficulty≤0.
+    require_positive_min_n(args.min_per_difficulty)
+
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         raise SystemExit("錯誤：未設定環境變數 GEMINI_API_KEY（僅供 eval workflow 使用）")
@@ -200,12 +316,38 @@ def run_generation(args: argparse.Namespace) -> Path:
         encoding="utf-8",
     )
 
-    if not args.allow_short_sample:
-        assert_sample_size(pooled_old, args.min_per_difficulty, "old")
-        assert_sample_size(pooled_cal, args.min_per_difficulty, "calibrated")
+    # Balanced eval sample: exactly min_per_difficulty per version×difficulty.
+    # Blind pack must not use raw model output counts (AIOS harness finding).
+    if args.allow_short_sample:
+        sampled_old = pooled_old
+        sampled_cal = pooled_cal
+    else:
+        sampled_old = sample_balanced(
+            pooled_old,
+            min_n=args.min_per_difficulty,
+            seed=args.blind_seed,
+            version="old",
+        )
+        sampled_cal = sample_balanced(
+            pooled_cal,
+            min_n=args.min_per_difficulty,
+            seed=args.blind_seed,
+            version="calibrated",
+        )
+
+    sampled_dir = out_dir / "sampled"
+    sampled_dir.mkdir(parents=True, exist_ok=True)
+    (sampled_dir / "old.json").write_text(
+        json.dumps(sampled_old, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    (sampled_dir / "calibrated.json").write_text(
+        json.dumps(sampled_cal, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
 
     items, key = build_blind_pack(
-        {"old": pooled_old, "calibrated": pooled_cal},
+        {"old": sampled_old, "calibrated": sampled_cal},
         seed=args.blind_seed,
     )
     write_blind_artifacts(out_dir / "blind", items, key)
@@ -217,10 +359,15 @@ def run_generation(args: argparse.Namespace) -> Path:
         "min_per_difficulty": args.min_per_difficulty,
         "blind_seed": args.blind_seed,
         "type_counts": type_counts,
-        "sample_sizes": {
+        "pooled_sizes": {
             "old": {d: len(pooled_old[d]) for d in DIFFICULTIES},
             "calibrated": {d: len(pooled_cal[d]) for d in DIFFICULTIES},
         },
+        "sample_sizes": {
+            "old": {d: len(sampled_old[d]) for d in DIFFICULTIES},
+            "calibrated": {d: len(sampled_cal[d]) for d in DIFFICULTIES},
+        },
+        "gemini_transient_max_retries": GEMINI_TRANSIENT_MAX_RETRIES,
         "production_questions_modified": False,
         "note": "Eval-only artifact. Do not commit into questions.json.",
     }
