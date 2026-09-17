@@ -149,6 +149,18 @@ def pool_questions(runs: list[dict]) -> dict[str, list]:
     return pooled
 
 
+def require_positive_min_n(min_n: int) -> None:
+    """Reject nonpositive balanced sample sizes before pool assert / slicing.
+
+    min_n=0 → empty slice; negative → Python reverse-index slice. Both would
+    otherwise let generation exit successfully with a useless blind pack.
+    """
+    if type(min_n) is not int or min_n < 1:
+        raise SystemExit(
+            f"min_per_difficulty 必須為正整數（≥1），收到：{min_n!r}"
+        )
+
+
 def sample_balanced(
     pooled: dict[str, list],
     *,
@@ -159,8 +171,10 @@ def sample_balanced(
     """Deterministically select exactly min_n questions per difficulty.
 
     Uses configured blind/eval seed — never the raw model output count.
-    Raises SystemExit when any difficulty has fewer than min_n pooled items.
+    Raises SystemExit when min_n is not a positive int, or when any difficulty
+    has fewer than min_n pooled items.
     """
+    require_positive_min_n(min_n)
     assert_sample_size(pooled, min_n, version)
     sampled: dict[str, list] = {}
     for diff in DIFFICULTIES:
@@ -245,6 +259,9 @@ def assert_sample_size(pooled: dict[str, list], min_n: int, version: str) -> Non
 
 
 def run_generation(args: argparse.Namespace) -> Path:
+    # Fail before Gemini spend when workflow_dispatch passes min_per_difficulty≤0.
+    require_positive_min_n(args.min_per_difficulty)
+
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         raise SystemExit("錯誤：未設定環境變數 GEMINI_API_KEY（僅供 eval workflow 使用）")

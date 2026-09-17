@@ -357,6 +357,20 @@ class TestBalancedEvalSampling(unittest.TestCase):
             sample_balanced(pooled, min_n=30, seed=1, version="old")
         self.assertIn("不足", str(ctx.exception))
 
+    def test_min_n_zero_fails(self):
+        # Codex P2: min_n=0 would slice to empty packs and still exit ok.
+        pooled = _bank(5, prefix="zero")
+        with self.assertRaises(SystemExit) as ctx:
+            sample_balanced(pooled, min_n=0, seed=1, version="old")
+        self.assertIn("正整數", str(ctx.exception))
+
+    def test_min_n_negative_fails(self):
+        # Codex P2: negative min_n uses reverse-index slice, wrong pack size.
+        pooled = _bank(5, prefix="neg")
+        with self.assertRaises(SystemExit) as ctx:
+            sample_balanced(pooled, min_n=-1, seed=1, version="old")
+        self.assertIn("正整數", str(ctx.exception))
+
 
 class _HttpError(Exception):
     def __init__(self, code: int, msg: str = ""):
