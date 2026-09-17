@@ -14,6 +14,9 @@ from eval.rubric import VERDICTS
 AC_MEDIUM_FIT_MIN = 0.65
 AC_HARD_FIT_MIN = 0.60
 AC_OVERALL_TOO_HARD_MAX = 0.10
+# Per-version per-difficulty minimum rated sample (Issue #46: ≥30).
+# Prefer meta["min_per_difficulty"] when present; otherwise this constant.
+DEFAULT_MIN_PER_DIFFICULTY = 30
 
 
 def _rate(count: int, total: int) -> float | None:
@@ -22,8 +25,33 @@ def _rate(count: int, total: int) -> float | None:
     return count / total
 
 
-def summarize(unblinded: list[dict[str, Any]]) -> dict[str, Any]:
-    """Build nested metrics: version → difficulty → verdict counts + rates."""
+def _resolve_min_per_difficulty(
+    min_per_difficulty: int | None = None,
+    meta: dict[str, Any] | None = None,
+) -> int:
+    """Single source for AC sample floor: explicit arg → meta → constant."""
+    if min_per_difficulty is not None:
+        return int(min_per_difficulty)
+    if meta is not None and meta.get("min_per_difficulty") is not None:
+        return int(meta["min_per_difficulty"])
+    return DEFAULT_MIN_PER_DIFFICULTY
+
+
+def summarize(
+    unblinded: list[dict[str, Any]],
+    *,
+    min_per_difficulty: int | None = None,
+    meta: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build nested metrics: version → difficulty → verdict counts + rates.
+
+    Acceptance Criteria only leave PENDING when calibrated rated sample
+    sizes meet the Issue #46 minimum (default 30 per difficulty). Medium/hard
+    FIT gates require that difficulty's n; overall TOO_HARD requires all
+    four difficulties to be sample-complete.
+    """
+    min_n = _resolve_min_per_difficulty(min_per_difficulty, meta)
+
     by_vd: dict[str, dict[str, Counter]] = {
         "old": {d: Counter() for d in DIFFICULTIES},
         "calibrated": {d: Counter() for d in DIFFICULTIES},
@@ -82,35 +110,71 @@ def summarize(unblinded: list[dict[str, Any]]) -> dict[str, Any]:
         result["versions"][version] = vdata
 
     cal = result["versions"]["calibrated"]
+    med_n = cal["by_difficulty"]["medium"]["n"]
+    hard_n = cal["by_difficulty"]["hard"]["n"]
     med_fit = cal["by_difficulty"]["medium"]["fit_rate"]
     hard_fit = cal["by_difficulty"]["hard"]["fit_rate"]
     too_hard = cal["overall"]["too_hard_rate"]
+
+    rated_n = {d: cal["by_difficulty"][d]["n"] for d in DIFFICULTIES}
+    sample_complete_by_diff = {d: rated_n[d] >= min_n for d in DIFFICULTIES}
+    # Overall TOO_HARD gate requires all four calibrated difficulties.
+    sample_complete = all(sample_complete_by_diff.values())
 
     def _status(ok: bool | None) -> str:
         if ok is None:
             return "PENDING"
         return "PASS" if ok else "FAIL"
 
-    med_ok = None if med_fit is None else med_fit >= AC_MEDIUM_FIT_MIN
-    hard_ok = None if hard_fit is None else hard_fit >= AC_HARD_FIT_MIN
-    th_ok = None if too_hard is None else too_hard <= AC_OVERALL_TOO_HARD_MAX
+    # Incomplete rated sample → PENDING (never PASS/FAIL on partial data).
+    med_ok = None if not sample_complete_by_diff["medium"] else med_fit >= AC_MEDIUM_FIT_MIN
+    hard_ok = None if not sample_complete_by_diff["hard"] else hard_fit >= AC_HARD_FIT_MIN
+    th_ok = None if not sample_complete else too_hard <= AC_OVERALL_TOO_HARD_MAX
+
+    def _criterion(
+        value: float | None,
+        threshold: float,
+        n: int,
+        ok: bool | None,
+        *,
+        complete: bool,
+    ) -> dict[str, Any]:
+        return {
+            "value": value,
+            "threshold": threshold,
+            "n": n,
+            "required_n": min_n,
+            "sample_complete": complete,
+            "status": _status(ok),
+        }
 
     result["acceptance"] = {
-        "calibrated_medium_fit": {
-            "value": med_fit,
-            "threshold": AC_MEDIUM_FIT_MIN,
-            "status": _status(med_ok),
-        },
-        "calibrated_hard_fit": {
-            "value": hard_fit,
-            "threshold": AC_HARD_FIT_MIN,
-            "status": _status(hard_ok),
-        },
-        "calibrated_overall_too_hard": {
-            "value": too_hard,
-            "threshold": AC_OVERALL_TOO_HARD_MAX,
-            "status": _status(th_ok),
-        },
+        "min_per_difficulty": min_n,
+        "rated_n": rated_n,
+        "required_n": min_n,
+        "sample_complete": sample_complete,
+        "sample_complete_by_difficulty": sample_complete_by_diff,
+        "calibrated_medium_fit": _criterion(
+            med_fit,
+            AC_MEDIUM_FIT_MIN,
+            med_n,
+            med_ok,
+            complete=sample_complete_by_diff["medium"],
+        ),
+        "calibrated_hard_fit": _criterion(
+            hard_fit,
+            AC_HARD_FIT_MIN,
+            hard_n,
+            hard_ok,
+            complete=sample_complete_by_diff["hard"],
+        ),
+        "calibrated_overall_too_hard": _criterion(
+            too_hard,
+            AC_OVERALL_TOO_HARD_MAX,
+            cal["overall"]["n"],
+            th_ok,
+            complete=sample_complete,
+        ),
     }
     statuses = [
         result["acceptance"][k]["status"]
@@ -146,14 +210,36 @@ def render_markdown_report(metrics: dict[str, Any], *, meta: dict[str, Any] | No
         lines.append(f"- Min per difficulty target: {meta.get('min_per_difficulty')}")
         lines.append("")
 
-    lines.extend(["## Sample sizes", ""])
-    lines.append("| Version | super_easy | easy | medium | hard | total |")
-    lines.append("|---|---:|---:|---:|---:|---:|")
+    ac = metrics.get("acceptance") or {}
+    required_n = ac.get("required_n")
+    if required_n is None and meta:
+        required_n = meta.get("min_per_difficulty")
+    if required_n is None:
+        required_n = DEFAULT_MIN_PER_DIFFICULTY
+
+    lines.extend(["## Sample sizes (rated)", ""])
+    lines.append(f"- Required n per difficulty: **{required_n}**")
+    cal_complete = ac.get("sample_complete")
+    if cal_complete is not None:
+        lines.append(
+            f"- Calibrated sample-complete: "
+            f"**{'YES' if cal_complete else 'NO'}**"
+        )
+    lines.append("")
+    lines.append(
+        "| Version | super_easy | easy | medium | hard | total | sample-complete |"
+    )
+    lines.append("|---|---:|---:|---:|---:|---:|:---:|")
     for version in ("old", "calibrated"):
         vd = metrics["versions"][version]
         cells = [str(vd["by_difficulty"][d]["n"]) for d in DIFFICULTIES]
+        complete = all(
+            vd["by_difficulty"][d]["n"] >= int(required_n) for d in DIFFICULTIES
+        )
         lines.append(
-            f"| {version} | " + " | ".join(cells) + f" | {vd['overall']['n']} |"
+            f"| {version} | "
+            + " | ".join(cells)
+            + f" | {vd['overall']['n']} | {'YES' if complete else 'NO'} |"
         )
     lines.append("")
 
@@ -193,20 +279,26 @@ def render_markdown_report(metrics: dict[str, Any], *, meta: dict[str, Any] | No
 
     lines.extend(["## Acceptance Criteria (calibrated only)", ""])
     ac = metrics["acceptance"]
+    med = ac["calibrated_medium_fit"]
+    hard = ac["calibrated_hard_fit"]
+    th = ac["calibrated_overall_too_hard"]
     lines.append(
-        f"- medium FIT ≥ 65%: "
-        f"{ac['calibrated_medium_fit']['status']} "
-        f"(value={ac['calibrated_medium_fit']['value']})"
+        f"- medium FIT ≥ 65%: {med['status']} "
+        f"(value={med['value']}; rated n={med.get('n')}/"
+        f"required {med.get('required_n')}; "
+        f"sample-complete={'YES' if med.get('sample_complete') else 'NO'})"
     )
     lines.append(
-        f"- hard FIT ≥ 60%: "
-        f"{ac['calibrated_hard_fit']['status']} "
-        f"(value={ac['calibrated_hard_fit']['value']})"
+        f"- hard FIT ≥ 60%: {hard['status']} "
+        f"(value={hard['value']}; rated n={hard.get('n')}/"
+        f"required {hard.get('required_n')}; "
+        f"sample-complete={'YES' if hard.get('sample_complete') else 'NO'})"
     )
     lines.append(
-        f"- overall TOO_HARD ≤ 10%: "
-        f"{ac['calibrated_overall_too_hard']['status']} "
-        f"(value={ac['calibrated_overall_too_hard']['value']})"
+        f"- overall TOO_HARD ≤ 10%: {th['status']} "
+        f"(value={th['value']}; rated n={th.get('n')}/"
+        f"required {th.get('required_n')} per difficulty; "
+        f"sample-complete={'YES' if th.get('sample_complete') else 'NO'})"
     )
     lines.append(f"- **Overall AC: {ac['overall']}**")
     lines.append("")
@@ -218,9 +310,12 @@ def write_report(
     unblinded: list[dict[str, Any]],
     *,
     meta: dict[str, Any] | None = None,
+    min_per_difficulty: int | None = None,
 ) -> dict[str, Any]:
     out_dir.mkdir(parents=True, exist_ok=True)
-    metrics = summarize(unblinded)
+    metrics = summarize(
+        unblinded, min_per_difficulty=min_per_difficulty, meta=meta
+    )
     (out_dir / "metrics.json").write_text(
         json.dumps(metrics, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",

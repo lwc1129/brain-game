@@ -13,12 +13,36 @@ from pathlib import Path
 from generate_questions import ALLOWED_TYPES, DIFFICULTIES, build_prompt
 from eval.blind import build_blind_pack, unblind_ratings, write_blind_artifacts
 from eval.prompts_old import build_old_prompt
-from eval.report import summarize
+from eval.report import (
+    DEFAULT_MIN_PER_DIFFICULTY,
+    render_markdown_report,
+    summarize,
+)
 from eval.rubric import verdict_from_bands
 
 
 def _q(text, qtype="計算"):
     return {"type": qtype, "q": text, "a": "A", "opts": ["A", "B", "C", "D"]}
+
+
+def _calibrated_rows(counts: dict[str, int], *, verdict: str = "FIT") -> list[dict]:
+    """Build calibrated unblinded rows with given per-difficulty counts."""
+    band = {"super_easy": 0, "easy": 1, "medium": 2, "hard": 3}
+    rows = []
+    for diff, n in counts.items():
+        for i in range(n):
+            rows.append(
+                {
+                    "id": f"cal-{diff}-{i}",
+                    "version": "calibrated",
+                    "difficulty": diff,
+                    "rated_band": band[diff],
+                    "verdict": verdict,
+                    "quality_issue": False,
+                    "reason": "test",
+                }
+            )
+    return rows
 
 
 class TestCalibratedPromptContract(unittest.TestCase):
@@ -151,7 +175,10 @@ class TestBlindUnblindReport(unittest.TestCase):
         self.assertEqual(versions, {"old", "calibrated"})
         metrics = summarize(unblinded)
         self.assertEqual(metrics["versions"]["calibrated"]["by_difficulty"]["medium"]["fit_rate"], 1.0)
-        self.assertEqual(metrics["acceptance"]["overall"], "PASS")
+        # 1 rated item per difficulty is below Issue #46 minimum → PENDING, not PASS
+        self.assertEqual(metrics["acceptance"]["overall"], "PENDING")
+        self.assertFalse(metrics["acceptance"]["sample_complete"])
+        self.assertEqual(metrics["acceptance"]["required_n"], DEFAULT_MIN_PER_DIFFICULTY)
 
     def test_quality_issue_independent_of_verdict(self):
         unblinded = [
@@ -190,6 +217,88 @@ class TestAcceptancePendingWithoutRatings(unittest.TestCase):
     def test_empty_calibrated_is_pending(self):
         metrics = summarize([])
         self.assertEqual(metrics["acceptance"]["overall"], "PENDING")
+        self.assertFalse(metrics["acceptance"]["sample_complete"])
+
+
+class TestAcceptanceSampleSizeEnforcement(unittest.TestCase):
+    """Issue #46: AC must not PASS on incomplete rated samples."""
+
+    def test_single_fit_item_must_not_pass(self):
+        rows = _calibrated_rows({d: 1 for d in DIFFICULTIES})
+        metrics = summarize(rows)
+        self.assertEqual(metrics["acceptance"]["calibrated_medium_fit"]["status"], "PENDING")
+        self.assertEqual(metrics["acceptance"]["calibrated_hard_fit"]["status"], "PENDING")
+        self.assertEqual(
+            metrics["acceptance"]["calibrated_overall_too_hard"]["status"], "PENDING"
+        )
+        self.assertEqual(metrics["acceptance"]["overall"], "PENDING")
+        self.assertFalse(metrics["acceptance"]["sample_complete"])
+
+    def test_medium_29_must_not_pass(self):
+        counts = {d: DEFAULT_MIN_PER_DIFFICULTY for d in DIFFICULTIES}
+        counts["medium"] = DEFAULT_MIN_PER_DIFFICULTY - 1  # 29
+        metrics = summarize(_calibrated_rows(counts))
+        med = metrics["acceptance"]["calibrated_medium_fit"]
+        self.assertEqual(med["n"], 29)
+        self.assertEqual(med["required_n"], DEFAULT_MIN_PER_DIFFICULTY)
+        self.assertFalse(med["sample_complete"])
+        self.assertEqual(med["status"], "PENDING")
+        self.assertEqual(metrics["acceptance"]["overall"], "PENDING")
+        self.assertFalse(metrics["acceptance"]["sample_complete"])
+
+    def test_hard_29_must_not_pass(self):
+        counts = {d: DEFAULT_MIN_PER_DIFFICULTY for d in DIFFICULTIES}
+        counts["hard"] = DEFAULT_MIN_PER_DIFFICULTY - 1  # 29
+        metrics = summarize(_calibrated_rows(counts))
+        hard = metrics["acceptance"]["calibrated_hard_fit"]
+        self.assertEqual(hard["n"], 29)
+        self.assertEqual(hard["required_n"], DEFAULT_MIN_PER_DIFFICULTY)
+        self.assertFalse(hard["sample_complete"])
+        self.assertEqual(hard["status"], "PENDING")
+        self.assertEqual(metrics["acceptance"]["overall"], "PENDING")
+        self.assertFalse(metrics["acceptance"]["sample_complete"])
+
+    def test_all_four_ge_30_enters_threshold_judgment(self):
+        counts = {d: DEFAULT_MIN_PER_DIFFICULTY for d in DIFFICULTIES}
+        metrics = summarize(_calibrated_rows(counts))
+        ac = metrics["acceptance"]
+        self.assertTrue(ac["sample_complete"])
+        self.assertTrue(all(ac["sample_complete_by_difficulty"].values()))
+        self.assertEqual(ac["calibrated_medium_fit"]["status"], "PASS")
+        self.assertEqual(ac["calibrated_hard_fit"]["status"], "PASS")
+        self.assertEqual(ac["calibrated_overall_too_hard"]["status"], "PASS")
+        self.assertEqual(ac["overall"], "PASS")
+
+    def test_incomplete_sample_overall_ac_pending(self):
+        # Even with perfect FIT rates, missing one tier keeps overall PENDING.
+        counts = {
+            "super_easy": DEFAULT_MIN_PER_DIFFICULTY,
+            "easy": DEFAULT_MIN_PER_DIFFICULTY,
+            "medium": DEFAULT_MIN_PER_DIFFICULTY,
+            "hard": DEFAULT_MIN_PER_DIFFICULTY - 1,
+        }
+        metrics = summarize(_calibrated_rows(counts))
+        self.assertEqual(metrics["acceptance"]["overall"], "PENDING")
+        self.assertEqual(
+            metrics["acceptance"]["calibrated_overall_too_hard"]["status"], "PENDING"
+        )
+
+    def test_meta_min_per_difficulty_overrides_constant(self):
+        # With meta floor=2, two FIT per tier is enough to enter threshold judgment.
+        rows = _calibrated_rows({d: 2 for d in DIFFICULTIES})
+        metrics = summarize(rows, meta={"min_per_difficulty": 2})
+        self.assertEqual(metrics["acceptance"]["required_n"], 2)
+        self.assertTrue(metrics["acceptance"]["sample_complete"])
+        self.assertEqual(metrics["acceptance"]["overall"], "PASS")
+
+    def test_report_shows_rated_required_and_sample_complete(self):
+        counts = {d: 1 for d in DIFFICULTIES}
+        metrics = summarize(_calibrated_rows(counts))
+        md = render_markdown_report(metrics)
+        self.assertIn("Required n per difficulty", md)
+        self.assertIn("sample-complete", md.lower())
+        self.assertIn("sample-complete=NO", md)
+        self.assertIn(f"rated n=1/required {DEFAULT_MIN_PER_DIFFICULTY}", md)
 
 
 if __name__ == "__main__":

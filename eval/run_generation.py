@@ -31,8 +31,8 @@ from generate_questions import (  # noqa: E402
 )
 from eval.blind import build_blind_pack, write_blind_artifacts  # noqa: E402
 from eval.prompts_old import build_old_prompt  # noqa: E402
+from eval.report import DEFAULT_MIN_PER_DIFFICULTY  # noqa: E402
 
-DEFAULT_MIN_PER_DIFFICULTY = 30
 DEFAULT_RUNS = 4
 DEFAULT_BLIND_SEED = 20260916
 
