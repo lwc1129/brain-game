@@ -5,7 +5,6 @@ No live Gemini calls. Execution: python -m unittest test_generate_questions test
 
 from __future__ import annotations
 
-import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -19,10 +18,22 @@ from eval.report import (
     summarize,
 )
 from eval.rubric import verdict_from_bands
+from eval.run_generation import (
+    GEMINI_TRANSIENT_MAX_RETRIES,
+    call_gemini_with_prompt,
+    is_transient_gemini_error,
+    sample_balanced,
+)
 
 
 def _q(text, qtype="計算"):
     return {"type": qtype, "q": text, "a": "A", "opts": ["A", "B", "C", "D"]}
+
+
+def _bank(n: int, *, prefix: str) -> dict[str, list]:
+    return {
+        d: [_q(f"{prefix} {d} {i}？") for i in range(n)] for d in DIFFICULTIES
+    }
 
 
 def _calibrated_rows(counts: dict[str, int], *, verdict: str = "FIT") -> list[dict]:
@@ -299,6 +310,130 @@ class TestAcceptanceSampleSizeEnforcement(unittest.TestCase):
         self.assertIn("sample-complete", md.lower())
         self.assertIn("sample-complete=NO", md)
         self.assertIn(f"rated n=1/required {DEFAULT_MIN_PER_DIFFICULTY}", md)
+
+
+class TestBalancedEvalSampling(unittest.TestCase):
+    """Post-merge harness fix: balanced sample size, not raw model output count."""
+
+    def test_uneven_pool_samples_exactly_min_per_difficulty(self):
+        # AIOS finding: calibrated ~60, old ~31 → blind must be 30/30 not 60/31.
+        old_pooled = _bank(31, prefix="old")
+        cal_pooled = _bank(60, prefix="cal")
+        seed = 20260916
+        min_n = DEFAULT_MIN_PER_DIFFICULTY
+        old_s = sample_balanced(old_pooled, min_n=min_n, seed=seed, version="old")
+        cal_s = sample_balanced(cal_pooled, min_n=min_n, seed=seed, version="calibrated")
+        for diff in DIFFICULTIES:
+            self.assertEqual(len(old_s[diff]), 30)
+            self.assertEqual(len(cal_s[diff]), 30)
+        items, key = build_blind_pack(
+            {"old": old_s, "calibrated": cal_s}, seed=seed
+        )
+        self.assertEqual(len(items), 240)
+        by_version = {"old": 0, "calibrated": 0}
+        for meta in key.values():
+            by_version[meta["version"]] += 1
+        self.assertEqual(by_version["old"], 120)
+        self.assertEqual(by_version["calibrated"], 120)
+
+    def test_deterministic_seed_reproducible(self):
+        pooled = _bank(40, prefix="x")
+        a = sample_balanced(pooled, min_n=30, seed=99, version="old")
+        b = sample_balanced(pooled, min_n=30, seed=99, version="old")
+        c = sample_balanced(pooled, min_n=30, seed=100, version="old")
+        for diff in DIFFICULTIES:
+            self.assertEqual(
+                [q["q"] for q in a[diff]],
+                [q["q"] for q in b[diff]],
+            )
+            self.assertNotEqual(
+                [q["q"] for q in a[diff]],
+                [q["q"] for q in c[diff]],
+            )
+
+    def test_insufficient_pooled_fails(self):
+        pooled = _bank(29, prefix="short")
+        with self.assertRaises(SystemExit) as ctx:
+            sample_balanced(pooled, min_n=30, seed=1, version="old")
+        self.assertIn("不足", str(ctx.exception))
+
+
+class _HttpError(Exception):
+    def __init__(self, code: int, msg: str = ""):
+        self.code = code
+        super().__init__(msg or f"HTTP {code}")
+
+
+class TestTransientGeminiRetry(unittest.TestCase):
+    """Post-merge harness fix: retry 429/5xx inside the same generation run."""
+
+    def test_is_transient_for_retryable_statuses(self):
+        for code in (429, 500, 502, 503, 504):
+            self.assertTrue(is_transient_gemini_error(_HttpError(code)))
+        self.assertFalse(is_transient_gemini_error(_HttpError(400)))
+        self.assertFalse(is_transient_gemini_error(_HttpError(401)))
+        self.assertFalse(is_transient_gemini_error(ValueError("bad json")))
+
+    def test_transient_503_retries_then_succeeds(self):
+        calls = {"n": 0}
+        sleeps: list[float] = []
+
+        def flaky(_key: str, _prompt: str) -> str:
+            calls["n"] += 1
+            if calls["n"] < 3:
+                raise _HttpError(503, "Service Unavailable")
+            return "ok"
+
+        out = call_gemini_with_prompt(
+            "fake-key",
+            "prompt",
+            max_retries=GEMINI_TRANSIENT_MAX_RETRIES,
+            base_delay_s=0.01,
+            sleep_fn=sleeps.append,
+            call_fn=flaky,
+        )
+        self.assertEqual(out, "ok")
+        self.assertEqual(calls["n"], 3)
+        self.assertEqual(len(sleeps), 2)
+        self.assertEqual(sleeps[0], 0.01)
+        self.assertEqual(sleeps[1], 0.02)
+
+    def test_exhausted_retries_clean_fail(self):
+        calls = {"n": 0}
+
+        def always_503(_key: str, _prompt: str) -> str:
+            calls["n"] += 1
+            raise _HttpError(503, "Service Unavailable")
+
+        with self.assertRaises(_HttpError):
+            call_gemini_with_prompt(
+                "fake-key",
+                "prompt",
+                max_retries=2,
+                base_delay_s=0.001,
+                sleep_fn=lambda _d: None,
+                call_fn=always_503,
+            )
+        # 1 initial + 2 retries
+        self.assertEqual(calls["n"], 3)
+
+    def test_non_transient_does_not_retry(self):
+        calls = {"n": 0}
+
+        def bad_request(_key: str, _prompt: str) -> str:
+            calls["n"] += 1
+            raise _HttpError(400, "Bad Request")
+
+        with self.assertRaises(_HttpError):
+            call_gemini_with_prompt(
+                "fake-key",
+                "prompt",
+                max_retries=3,
+                base_delay_s=0.001,
+                sleep_fn=lambda _d: None,
+                call_fn=bad_request,
+            )
+        self.assertEqual(calls["n"], 1)
 
 
 if __name__ == "__main__":
