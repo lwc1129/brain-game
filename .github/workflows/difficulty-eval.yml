@@ -1,0 +1,78 @@
+name: Difficulty Calibration Evaluation
+
+# Issue #46 Option B — eval-only.
+# Constraints:
+# - workflow_dispatch only (no schedule)
+# - never called by production update_questions / deploy
+# - never commits or overwrites questions.json
+# - Gemini output goes only to evaluation artifacts
+on:
+  workflow_dispatch:
+    inputs:
+      runs_per_version:
+        description: Independent generation runs per prompt version (≥3 recommended)
+        required: true
+        default: '4'
+        type: string
+      min_per_difficulty:
+        description: Minimum pooled questions per difficulty per version
+        required: true
+        default: '30'
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements-generate.txt
+
+      - name: Snapshot production questions.json checksum (must stay unchanged)
+        id: pre
+        run: |
+          set -euo pipefail
+          sha256sum questions.json | tee /tmp/questions.pre.sha
+
+      - name: Run before/after generation + blinding
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          set -euo pipefail
+          python -m eval.run_generation \
+            --out-dir eval_output \
+            --questions-path questions.json \
+            --runs "${{ inputs.runs_per_version }}" \
+            --min-per-difficulty "${{ inputs.min_per_difficulty }}" \
+            --blind-seed 20260916
+
+      - name: Assert questions.json unchanged
+        run: |
+          set -euo pipefail
+          sha256sum questions.json | tee /tmp/questions.post.sha
+          if ! cmp -s /tmp/questions.pre.sha /tmp/questions.post.sha; then
+            echo "FATAL: evaluation modified questions.json"
+            exit 1
+          fi
+          echo "questions.json unchanged — OK"
+
+      - name: Upload evaluation artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: difficulty-eval-${{ github.run_id }}
+          path: eval_output/
+          if-no-files-found: error
+          retention-days: 30
