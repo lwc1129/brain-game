@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import handler, {
   buildPrompt,
   checkRateLimit,
+  GEMINI_TIMEOUT_MS,
   getClientKey,
   isValidQuestions,
   pickPromptTypes,
@@ -524,4 +525,78 @@ test('handler：Gemini 回傳 markdown 包裝的 JSON 時回 200', async () => {
     if (prev !== undefined) process.env.GEMINI_API_KEY = prev;
     else delete process.env.GEMINI_API_KEY;
   }
+});
+
+// ── handler：Gemini 呼叫例外（逾時 / 網路錯誤）──────────────────────────
+async function runWithFetch(impl) {
+  const prev = process.env.GEMINI_API_KEY;
+  process.env.GEMINI_API_KEY = 'test-key';
+  const errors = [];
+  const origErr = console.error;
+  const origLog = console.log;
+  console.error = (msg) => errors.push(msg);
+  console.log = () => {};
+  const restore = stubFetch(impl);
+  try {
+    const res = makeRes();
+    await handler(makeReq({ ip: freshIp() }), res);
+    return { res, errors };
+  } finally {
+    restore();
+    console.error = origErr;
+    console.log = origLog;
+    if (prev !== undefined) process.env.GEMINI_API_KEY = prev;
+    else delete process.env.GEMINI_API_KEY;
+  }
+}
+
+test('handler：Gemini fetch 逾時時回 502 並記錄 TimeoutError', async () => {
+  const { res, errors } = await runWithFetch(async () => {
+    throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+  });
+  assert.equal(res.statusCode, 502);
+  assert.deepEqual(res.body, { error: 'generation failed' });
+  const entry = JSON.parse(errors.find((m) => m.includes('Gemini 呼叫例外')) || '{}');
+  assert.equal(entry.level, 'error');
+  assert.ok(entry.ts);
+  assert.equal(entry.ctx.diffKey, 'easy');
+  assert.equal(entry.ctx.errorName, 'TimeoutError');
+  assert.equal(entry.ctx.timeoutMs, GEMINI_TIMEOUT_MS);
+});
+
+test('handler：Gemini 網路錯誤時回 502 而非未處理例外', async () => {
+  const { res, errors } = await runWithFetch(async () => {
+    throw new TypeError('fetch failed');
+  });
+  assert.equal(res.statusCode, 502);
+  const entry = JSON.parse(errors.find((m) => m.includes('Gemini 呼叫例外')) || '{}');
+  assert.equal(entry.ctx.errorName, 'TypeError');
+  assert.equal(entry.ctx.error, 'fetch failed');
+});
+
+test('handler：Gemini 回應 body 不是 JSON 時回 502', async () => {
+  const { res, errors } = await runWithFetch(async () => ({
+    ok: true,
+    json: async () => {
+      throw new SyntaxError('Unexpected token < in JSON');
+    },
+  }));
+  assert.equal(res.statusCode, 502);
+  assert.ok(errors.some((m) => m.includes('Gemini 呼叫例外')));
+});
+
+test('handler：呼叫 Gemini 時帶上逾時 signal', async () => {
+  let seenSignal;
+  const { res } = await runWithFetch(async (_url, init) => {
+    seenSignal = init?.signal;
+    return geminiOk(threeQuestions())();
+  });
+  assert.equal(res.statusCode, 200);
+  assert.ok(seenSignal instanceof AbortSignal);
+  assert.equal(seenSignal.aborted, false);
+});
+
+test('GEMINI_TIMEOUT_MS：必須小於前端 FETCH_TIMEOUT_MS（8000ms）', () => {
+  assert.ok(GEMINI_TIMEOUT_MS > 0);
+  assert.ok(GEMINI_TIMEOUT_MS < 8000);
 });

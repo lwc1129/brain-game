@@ -7,12 +7,14 @@ import {
   applyDailyResult,
   computeScore,
   countCorrect,
+  effectiveStreak,
   formatDateKey,
   getDiff,
   isValidQuestionBank,
   isValidQuestions,
   MAX_HISTORY_LOG,
   pickQuestions,
+  playedDays,
   revertDailyResult,
   shareMsg,
   shuffleOptions,
@@ -369,4 +371,93 @@ test('formatDateKey / yesterdayKey', () => {
 test('內建題庫本身通過驗證', async () => {
   const { QB_FALLBACK } = await import('../js/fallback-questions.js');
   assert.ok(isValidQuestionBank(QB_FALLBACK));
+});
+
+// ── 累積天數（不受 MAX_HISTORY_LOG 截斷）────────────────────────────────
+test('playedDays：有 days 欄位時直接使用', () => {
+  assert.equal(playedDays({ days: 42, log: [] }), 42);
+});
+
+test('playedDays：舊版資料沒有 days 時以 log.length 遷移', () => {
+  assert.equal(playedDays({ log: [{}, {}, {}] }), 3);
+});
+
+test('playedDays：days 非數字或 hist 缺 log 時不爆炸', () => {
+  assert.equal(playedDays({ days: 'x', log: [{}] }), 1);
+  assert.equal(playedDays({}), 0);
+  assert.equal(playedDays(null), 0);
+});
+
+test('applyDailyResult：log 截斷後累積天數仍持續增加', () => {
+  const log = Array.from({ length: MAX_HISTORY_LOG }, (_, i) => ({
+    date: `2026-01-${String(i + 1).padStart(2, '0')}`,
+    steps: 5000,
+    correct: 3,
+    score: 35,
+  }));
+  const hist = { total: 0, streak: 0, lastDate: null, log, days: MAX_HISTORY_LOG };
+  const next = applyDailyResult(hist, {
+    today: '2026-02-01',
+    yesterday: '2026-01-31',
+    steps: 5000,
+    correct: 3,
+    score: 35,
+  });
+  assert.equal(next.log.length, MAX_HISTORY_LOG);
+  assert.equal(next.days, MAX_HISTORY_LOG + 1);
+});
+
+test('applyDailyResult：同日重玩不重複累加天數', () => {
+  const args = { today: '2026-06-10', yesterday: '2026-06-09', steps: 5000, correct: 3, score: 35 };
+  const first = applyDailyResult({ total: 0, streak: 0, lastDate: null, log: [], days: 5 }, args);
+  const second = applyDailyResult(first, { ...args, correct: 1, score: 10 });
+  assert.equal(first.days, 6);
+  assert.equal(second.days, 6);
+});
+
+test('revertDailyResult：撤銷當日時天數減一，當日無記錄時不變', () => {
+  const hist = {
+    total: 35,
+    streak: 0,
+    lastDate: null,
+    log: [{ date: '2026-06-10', steps: 1000, correct: 3, score: 35 }],
+    days: 40,
+  };
+  assert.equal(revertDailyResult(hist, { today: '2026-06-10', score: 35 }).days, 39);
+  assert.equal(revertDailyResult(hist, { today: '2026-06-11', score: 0 }).days, 40);
+});
+
+test('revertDailyResult：天數不會低於 0', () => {
+  const hist = {
+    total: 35,
+    streak: 0,
+    lastDate: null,
+    log: [{ date: '2026-06-10', steps: 1000, correct: 3, score: 35 }],
+    days: 0,
+  };
+  assert.equal(revertDailyResult(hist, { today: '2026-06-10', score: 35 }).days, 0);
+});
+
+// ── 顯示用連勝（中斷後歸零）──────────────────────────────────────────────
+test('effectiveStreak：lastDate 為今天或昨天時沿用 streak', () => {
+  assert.equal(effectiveStreak({ streak: 7, lastDate: '2026-06-10' }, '2026-06-10', '2026-06-09'), 7);
+  assert.equal(effectiveStreak({ streak: 7, lastDate: '2026-06-09' }, '2026-06-10', '2026-06-09'), 7);
+});
+
+test('effectiveStreak：lastDate 為 2 天前時顯示 0', () => {
+  assert.equal(effectiveStreak({ streak: 7, lastDate: '2026-06-08' }, '2026-06-10', '2026-06-09'), 0);
+});
+
+test('effectiveStreak：從未達標（lastDate 為 null）時顯示 0', () => {
+  assert.equal(effectiveStreak({ streak: 0, lastDate: null }, '2026-06-10', '2026-06-09'), 0);
+});
+
+test('effectiveStreak：今天步數不足但昨天達標，連勝仍保留', () => {
+  const hist = applyDailyResult(
+    { total: 0, streak: 4, lastDate: '2026-06-09', log: [] },
+    { today: '2026-06-10', yesterday: '2026-06-09', steps: 1000, correct: 3, score: 35 }
+  );
+  assert.equal(effectiveStreak(hist, '2026-06-10', '2026-06-09'), 4);
+  // 隔天再看：昨天（06-10）沒達標，連勝已斷
+  assert.equal(effectiveStreak(hist, '2026-06-11', '2026-06-10'), 0);
 });

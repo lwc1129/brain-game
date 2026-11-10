@@ -99,6 +99,18 @@ export function shareMsg(c) {
   return '今天先熱身，明天再接再厲 😄';
 }
 
+// 累積遊玩天數。log 受 MAX_HISTORY_LOG 截斷，不能拿 log.length 當天數；
+// 改由 hist.days 計數。舊版資料沒有 days 欄位時以 log.length 為初始值（遷移）。
+export function playedDays(hist) {
+  return Number.isFinite(hist?.days) ? hist.days : (hist?.log?.length ?? 0);
+}
+
+// 顯示用連勝天數：儲存的 streak 只在達標日更新，中斷後仍保留舊值。
+// lastDate 不是今天或昨天，代表連勝已斷，顯示 0（下次達標時 applyDailyResult 會重設為 1）。
+export function effectiveStreak(hist, today, yesterday) {
+  return hist.lastDate === today || hist.lastDate === yesterday ? hist.streak : 0;
+}
+
 // 完成當日挑戰後更新歷史統計（回傳新物件，不修改傳入的 hist）。
 // 同日冪等：若 log 已有當日記錄，先撤銷舊筆再寫入，避免「返回主頁後重玩」重複計分（#33）。
 export function applyDailyResult(hist, { today, yesterday, steps, correct, score }) {
@@ -107,7 +119,7 @@ export function applyDailyResult(hist, { today, yesterday, steps, correct, score
   const hadToday = hist.log.some((e) => e.date === today);
   const priorScore = hist.log.reduce((sum, e) => (e.date === today ? sum + e.score : sum), 0);
   const base = hadToday ? revertDailyResult(hist, { today, score: priorScore }) : hist;
-  const next = { ...base, log: [...base.log] };
+  const next = { ...base, log: [...base.log], days: playedDays(base) + 1 };
   if (steps >= STREAK_STEP_GOAL) {
     if (next.lastDate === yesterday) next.streak += 1;
     else if (next.lastDate !== today) next.streak = 1;
@@ -124,6 +136,8 @@ export function applyDailyResult(hist, { today, yesterday, steps, correct, score
 // 不可從剩餘 log 重算——log 有 MAX_HISTORY_LOG 上限，重算會把 31+ 連勝永久縮水（#33 Codex P1）。
 export function revertDailyResult(hist, { today, score }) {
   const log = hist.log.filter((d) => d.date !== today);
+  const hadToday = log.length !== hist.log.length;
+  const days = hadToday ? Math.max(0, playedDays(hist) - 1) : playedDays(hist);
   let streak = hist.streak;
   let lastDate = hist.lastDate;
   if (lastDate === today) {
@@ -136,7 +150,7 @@ export function revertDailyResult(hist, { today, score }) {
       lastDate = null;
     }
   }
-  return { ...hist, total: hist.total - score, log, streak, lastDate };
+  return { ...hist, total: hist.total - score, log, days, streak, lastDate };
 }
 
 // 驗證動態題庫結構：四個難度皆存在、皆為陣列、且各自題目數 >= 最低需求。

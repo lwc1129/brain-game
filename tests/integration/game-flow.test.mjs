@@ -4,8 +4,10 @@ import assert from 'node:assert/strict';
 
 import {
   applyDailyResult,
+  effectiveStreak,
   formatDateKey,
   MAX_HISTORY_LOG,
+  playedDays,
   revertDailyResult,
   STREAK_STEP_GOAL,
 } from '../../js/logic.js';
@@ -182,5 +184,35 @@ test('integration [storage-cap]: history 達 MAX_HISTORY_LOG 後 trim', () => {
     assert.equal(next.log.length, MAX_HISTORY_LOG);
     assert.equal(next.log.at(-1).date, '2026-07-01');
     assert.notEqual(next.log[0].date, log[0].date, '最舊一筆應被裁掉');
+  });
+});
+
+test('integration [broken-streak]: 中斷 2 天後回來、尚未遊玩時連勝顯示 0', () => {
+  runProfile('broken-streak', function brokenStreakDisplay() {
+    const hist = { total: 100, streak: 5, lastDate: '2026-06-08', log: [] };
+    assert.equal(effectiveStreak(hist, '2026-06-10', '2026-06-09'), 0);
+  });
+});
+
+test('integration [storage-cap]: 連續遊玩 45 天，log 截斷但累積天數為 45', () => {
+  runProfile('storage-cap', function storageCapDays() {
+    let hist = emptyHist();
+    const base = new Date(2026, 0, 1);
+    for (let i = 0; i < 45; i++) {
+      const d = new Date(base);
+      d.setDate(d.getDate() + i);
+      const prev = new Date(d);
+      prev.setDate(prev.getDate() - 1);
+      hist = applyDailyResult(hist, {
+        today: formatDateKey(d),
+        yesterday: formatDateKey(prev),
+        steps: STREAK_STEP_GOAL,
+        correct: 3,
+        score: 35,
+      });
+    }
+    assert.equal(hist.log.length, MAX_HISTORY_LOG);
+    assert.equal(playedDays(hist), 45);
+    assert.equal(hist.streak, 45);
   });
 });

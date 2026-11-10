@@ -25,6 +25,9 @@ const DEFAULT_RATE_LIMIT_MAX = 30;
 const DEFAULT_RATE_LIMIT_WINDOW_MS = 60_000;
 // 限流表的鍵數量上限，超過時觸發清掃，避免記憶體無限成長。
 const MAX_TRACKED_KEYS = 10_000;
+// Gemini 呼叫逾時。必須小於前端 FETCH_TIMEOUT_MS（js/ai.js，8000ms），
+// 讓 proxy 先放棄並回 502 + 結構化 log，而不是前端先 abort、後端無聲掛著。
+export const GEMINI_TIMEOUT_MS = 7_000;
 
 // 記憶體型滑動視窗限流狀態（來源 → 命中時間戳陣列）。
 //
@@ -149,6 +152,7 @@ async function callGemini(diffKey, apiKey) {
         'Content-Type': 'application/json',
         'x-goog-api-key': apiKey,
       },
+      signal: AbortSignal.timeout(GEMINI_TIMEOUT_MS),
       body: JSON.stringify({
         contents: [{ parts: [{ text: buildPrompt(diffKey, types) }] }],
         generationConfig: {
@@ -275,7 +279,27 @@ export default async function handler(req, res) {
 
   if (!process.env.GEMINI_API_KEY) return res.status(503).json({ error: 'proxy not configured' });
 
-  const questions = await callGemini(difficulty, process.env.GEMINI_API_KEY);
+  // fetch 逾時（TimeoutError）、網路錯誤、回應 body 非 JSON 都會丟例外；
+  // 一律記錄結構化 log 並回 502，避免未處理例外變成無 log 的 500。
+  let questions;
+  try {
+    questions = await callGemini(difficulty, process.env.GEMINI_API_KEY);
+  } catch (e) {
+    console.error(
+      JSON.stringify({
+        level: 'error',
+        ts: new Date().toISOString(),
+        msg: 'Gemini 呼叫例外',
+        ctx: {
+          diffKey: difficulty,
+          errorName: e?.name ?? 'Error',
+          error: e?.message ?? String(e),
+          timeoutMs: GEMINI_TIMEOUT_MS,
+        },
+      })
+    );
+    return res.status(502).json({ error: 'generation failed' });
+  }
   if (!questions) return res.status(502).json({ error: 'generation failed' });
   return res.status(200).json({ questions });
 }
