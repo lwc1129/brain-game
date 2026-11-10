@@ -108,6 +108,7 @@ export function playedDays(hist) {
 // 顯示用連勝天數：儲存的 streak 只在達標日更新，中斷後仍保留舊值。
 // lastDate 不是今天或昨天，代表連勝已斷，顯示 0（下次達標時 applyDailyResult 會重設為 1）。
 export function effectiveStreak(hist, today, yesterday) {
+  if (!hist) return 0;
   return hist.lastDate === today || hist.lastDate === yesterday ? hist.streak : 0;
 }
 

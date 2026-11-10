@@ -461,3 +461,8 @@ test('effectiveStreak：今天步數不足但昨天達標，連勝仍保留', ()
   // 隔天再看：昨天（06-10）沒達標，連勝已斷
   assert.equal(effectiveStreak(hist, '2026-06-11', '2026-06-10'), 0);
 });
+
+test('effectiveStreak：hist 為 null / undefined 時回 0 而非拋錯', () => {
+  assert.equal(effectiveStreak(null, '2026-06-10', '2026-06-09'), 0);
+  assert.equal(effectiveStreak(undefined, '2026-06-10', '2026-06-09'), 0);
+});
