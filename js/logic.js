@@ -13,6 +13,15 @@ export const STREAK_STEP_GOAL = 3000;
 // 歷史記錄保留筆數上限。
 export const MAX_HISTORY_LOG = 30;
 
+// 題型白名單（與 generate_questions.py 的 ALLOWED_TYPES 對齊）。
+// api/questions.js 由此 import，prompt 插值與回應驗證共用同一份清單。
+export const QUESTION_TYPES = ['邏輯', '計算', '數列', '推理', '語言', '記憶', '常識'];
+
+// 題目與選項長度上限：擋下模型失控輸出的長篇文字，避免破版。
+// 現有題庫最長題目 134 字、最長選項 57 字，上限留有餘裕。
+export const MAX_QUESTION_LEN = 200;
+export const MAX_OPTION_LEN = 80;
+
 // 步數輸入上限，與 index.html #si 的 max 屬性對齊。
 export const MAX_STEPS = 99999;
 
@@ -162,22 +171,107 @@ export function isValidQuestionBank(data) {
   );
 }
 
+function isNonEmptyString(v, maxLen) {
+  return typeof v === 'string' && v.trim().length > 0 && v.length <= maxLen;
+}
+
 export function isValidQuestion(q) {
   return (
     !!q &&
     typeof q === 'object' &&
-    typeof q.type === 'string' &&
-    typeof q.q === 'string' &&
-    typeof q.a === 'string' &&
+    QUESTION_TYPES.includes(q.type) &&
+    isNonEmptyString(q.q, MAX_QUESTION_LEN) &&
+    isNonEmptyString(q.a, MAX_OPTION_LEN) &&
     Array.isArray(q.opts) &&
     q.opts.length === 4 &&
-    q.opts.every((o) => typeof o === 'string') &&
+    q.opts.every((o) => isNonEmptyString(o, MAX_OPTION_LEN)) &&
     new Set(q.opts).size === 4 &&
     q.opts.includes(q.a)
   );
 }
 
-// 驗證 AI proxy 回傳的單日題組。
+// ── 純算式題驗算 ─────────────────────────────────────────────────────────
+// AI 即時出題沒有人工 / eval 把關，算錯的題目對長者傷害最大。
+// 題目「只由數字與運算符號組成，並以 = ？ 結尾」時（如「8 × 11 − 5 × 4 = ？」），
+// 以自寫的遞迴下降解析器計算（不使用 eval），與答案比對。應用題等其他題目不在此範圍。
+const ARITH_QUESTION = /^([\d\s.+\-−＋－×xX*÷/()（）]+)[=＝]\s*[？?]\s*$/;
+const OP_ALIASES = { '−': '-', '＋': '+', '－': '-', '×': '*', x: '*', X: '*', '÷': '/', '（': '(', '）': ')' };
+
+function tokenizeArithmetic(expr) {
+  const tokens = [];
+  const src = expr;
+  for (let i = 0; i < src.length; ) {
+    if (/\s/.test(src[i])) {
+      i += 1;
+      continue;
+    }
+    const num = /^\d+(\.\d+)?/.exec(src.slice(i));
+    if (num) {
+      tokens.push(Number(num[0]));
+      i += num[0].length;
+      continue;
+    }
+    const op = OP_ALIASES[src[i]] ?? src[i];
+    if (!'+-*/()'.includes(op)) return null;
+    tokens.push(op);
+    i += 1;
+  }
+  return tokens;
+}
+
+// 解析並計算算式；語法錯誤回傳 null，除以 0 等回傳非有限數。
+export function evaluateArithmetic(expr) {
+  const tokens = tokenizeArithmetic(expr);
+  if (!tokens || tokens.length === 0) return null;
+  let pos = 0;
+  const peek = () => tokens[pos];
+  function factor() {
+    const t = tokens[pos++];
+    if (typeof t === 'number') return t;
+    if (t === '-') return -factor();
+    if (t === '(') {
+      const v = sum();
+      if (tokens[pos++] !== ')') throw new Error('unbalanced');
+      return v;
+    }
+    throw new Error('unexpected token');
+  }
+  function product() {
+    let v = factor();
+    while (peek() === '*' || peek() === '/') v = tokens[pos++] === '*' ? v * factor() : v / factor();
+    return v;
+  }
+  function sum() {
+    let v = product();
+    while (peek() === '+' || peek() === '-') v = tokens[pos++] === '+' ? v + product() : v - product();
+    return v;
+  }
+  try {
+    const v = sum();
+    return pos === tokens.length ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+// 純算式題回傳答案是否正確（true / false）；非純算式題或算式無法解析回傳 null（不適用）。
+// 答案取開頭數字比對，允許附單位（如「68元」）與千分位逗號。
+export function checkArithmeticAnswer(q) {
+  const m = ARITH_QUESTION.exec(q?.q ?? '');
+  if (!m) return null;
+  const expected = evaluateArithmetic(m[1]);
+  if (expected === null) return null;
+  if (!Number.isFinite(expected)) return false;
+  const ans = /^-?\d+(\.\d+)?/.exec(String(q.a).replace(/,/g, '').trim());
+  if (!ans) return false;
+  return Math.abs(Number(ans[0]) - expected) < 1e-9;
+}
+
+// 驗證 AI proxy 回傳的單日題組：結構合法，且純算式題的答案必須算得對。
 export function isValidQuestions(qs) {
-  return Array.isArray(qs) && qs.length >= QUESTIONS_PER_DAY && qs.every(isValidQuestion);
+  return (
+    Array.isArray(qs) &&
+    qs.length >= QUESTIONS_PER_DAY &&
+    qs.every((q) => isValidQuestion(q) && checkArithmeticAnswer(q) !== false)
+  );
 }

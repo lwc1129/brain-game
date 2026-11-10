@@ -35,6 +35,12 @@ DIFFICULTIES = ["hard", "medium", "easy", "super_easy"]
 # 與 api/questions.js 的 QUESTION_TYPES 對齊。
 ALLOWED_TYPES = ["計算", "邏輯", "數列", "推理", "語言", "記憶", "常識"]
 
+# 題目與選項長度上限，與前端 js/logic.js 的 MAX_QUESTION_LEN / MAX_OPTION_LEN 對齊。
+# 前端 isValidQuestionBank 會以同樣規則驗證整份題庫；這裡先逐題濾掉，
+# 避免單一壞題讓整份 questions.json 被前端拒收。
+MAX_QUESTION_LEN = 200
+MAX_OPTION_LEN = 80
+
 # 每個難度的最低題目數。對齊前端 js/logic.js 的 pickQuestions()：
 # 每次抽 3 題，故每個難度至少需 3 題才能保證遊戲正常運作。
 MIN_PER_DIFFICULTY = 3
@@ -197,12 +203,22 @@ def describe_question_defect(q):
         return "q 必須是非空字串"
     if not isinstance(q["a"], str) or not q["a"].strip():
         return "a 必須是非空字串"
+    if q["type"] not in ALLOWED_TYPES:
+        return f"type 不在題型白名單：{q['type']}"
+    if len(q["q"]) > MAX_QUESTION_LEN:
+        return f"q 超過長度上限 {MAX_QUESTION_LEN} 字"
+    if len(q["a"]) > MAX_OPTION_LEN:
+        return f"a 超過長度上限 {MAX_OPTION_LEN} 字"
 
     opts = q["opts"]
     if not isinstance(opts, list) or len(opts) != 4:
         return "opts 必須是 4 個選項的陣列"
     if not all(isinstance(o, str) for o in opts):
         return "opts 必須全部為字串"
+    if not all(o.strip() for o in opts):
+        return "opts 不可有空白選項"
+    if any(len(o) > MAX_OPTION_LEN for o in opts):
+        return f"opts 有選項超過長度上限 {MAX_OPTION_LEN} 字"
     if len(set(opts)) != 4:
         return "opts 有重複選項，4 個選項必須互不相同"
     if q["a"] not in opts:
