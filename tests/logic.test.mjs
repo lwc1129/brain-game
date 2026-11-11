@@ -21,6 +21,7 @@ import {
   pickQuestions,
   playedDays,
   revertDailyResult,
+  settleWithin,
   shareMsg,
   shuffleOptions,
   yesterdayKey,
@@ -548,4 +549,24 @@ test('checkArithmeticAnswer：題庫與內建題庫的純算式題全部算對',
       for (const q of qs) assert.notEqual(checkArithmeticAnswer(q), false, q.q);
     }
   }
+});
+
+// ── settleWithin：背景題庫的有限等待 ─────────────────────────────────────
+test('settleWithin：promise 在時限內完成時回傳其值', async () => {
+  assert.deepEqual(await settleWithin(Promise.resolve(42), 100), { done: true, value: 42 });
+});
+
+test('settleWithin：逾時回傳 done:false，不會一直等', async () => {
+  const never = new Promise(() => {});
+  const t0 = Date.now();
+  assert.deepEqual(await settleWithin(never, 30), { done: false });
+  assert.ok(Date.now() - t0 < 1000);
+});
+
+test('settleWithin：promise reject 時視為已完成且無值，不往外丟錯', async () => {
+  assert.deepEqual(await settleWithin(Promise.reject(new Error('x')), 100), { done: true, value: undefined });
+});
+
+test('settleWithin：非 promise 值直接視為已完成', async () => {
+  assert.deepEqual(await settleWithin('ok', 100), { done: true, value: 'ok' });
 });

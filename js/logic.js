@@ -275,3 +275,18 @@ export function isValidQuestions(qs) {
     qs.every((q) => isValidQuestion(q) && checkArithmeticAnswer(q) !== false)
   );
 }
+
+// 等待 promise 最多 ms 毫秒：如期完成回傳 { done: true, value }，逾時回傳 { done: false }。
+// 用於「題庫在背景下載，按開始時最多等一下」這類不能讓長輩卡住的等待。
+// promise 若 reject 視為 { done: true, value: undefined }（呼叫端已自行記錄錯誤）。
+export function settleWithin(promise, ms) {
+  let timer;
+  const timeout = new Promise((resolve) => {
+    timer = setTimeout(() => resolve({ done: false }), ms);
+  });
+  const settled = Promise.resolve(promise).then(
+    (value) => ({ done: true, value }),
+    () => ({ done: true, value: undefined })
+  );
+  return Promise.race([settled, timeout]).finally(() => clearTimeout(timer));
+}

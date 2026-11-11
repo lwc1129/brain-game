@@ -12,6 +12,7 @@ import {
   pickQuestions,
   QUESTIONS_PER_DAY,
   revertDailyResult,
+  settleWithin,
   shuffleOptions,
   yesterdayKey,
 } from './logic.js';
@@ -46,9 +47,14 @@ let _loadingMsgTimer = null;
 // 出題請求進行中時不換日，避免 await 回來後把題目寫進新一天的 _data。
 let _starting = false;
 
+// 按「開始」時題庫若還在下載，最多等這麼久，逾時就先用內建題庫，不讓長輩卡在畫面上。
+const BANK_WAIT_MS = 3000;
+
+// 題庫在背景下載，不擋首次畫面。no-cache：每次向伺服器確認（ETag），
+// 沒變就用瀏覽器快取，不必每次重新下載 284KB。
 async function fetchQuestionBank() {
   try {
-    const r = await fetch('./questions.json', { cache: 'no-store' });
+    const r = await fetch('./questions.json', { cache: 'no-cache' });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const data = await r.json();
     if (!isValidQuestionBank(data)) {
@@ -61,6 +67,13 @@ async function fetchQuestionBank() {
     console.warn('questions.json 載入失敗，使用內建題庫：', e.message || e);
     logError('fetchQuestionBank', e);
   }
+}
+
+let _bankReady = Promise.resolve();
+
+async function waitForBank() {
+  const r = await settleWithin(_bankReady, BANK_WAIT_MS);
+  if (!r.done) logError('waitForBank', new Error(`questions.json 超過 ${BANK_WAIT_MS}ms 未載入，先用內建題庫`));
 }
 
 function pickFromBank(diffKey) {
@@ -198,9 +211,11 @@ async function startGame(v, diff) {
       _data.questions = shuffleOptions(aiQs);
       _data.aiGenerated = true;
     } else {
+      await waitForBank();
       _data.questions = pickFromBank(diff.key);
     }
   } else {
+    await waitForBank();
     _data.questions = pickFromBank(diff.key);
   }
   saveTodayData(TODAY, _data);
@@ -301,4 +316,6 @@ async function init() {
   });
 }
 
-fetchQuestionBank().then(init);
+// 先畫出畫面，題庫在背景下載（見 waitForBank）。
+_bankReady = fetchQuestionBank();
+init();
