@@ -43,7 +43,7 @@ export function buildCompleteHtml(today, data, c, sc, diff, hist, dots) {
       <button class="btn-share" id="copyBtn">${shareButtonLabel(canNativeShare())}</button>
       <button class="btn-retry" id="retryBtn" aria-controls="retryConfirm" aria-expanded="false">重新挑戰</button>
     </div>
-    <div class="confirm-panel" id="retryConfirm" role="alertdialog" aria-labelledby="retryConfirmMsg" hidden>
+    <div class="confirm-panel" id="retryConfirm" role="group" aria-labelledby="retryConfirmMsg" hidden>
       <div class="confirm-msg" id="retryConfirmMsg">確定要重新挑戰嗎？<br>今日得分 +${sc} 將會扣除。</div>
       <div class="confirm-actions">
         <button type="button" class="btn-confirm-yes" id="retryYes">確定重新挑戰</button>
@@ -125,6 +125,10 @@ function bindRetryConfirm(onRetry) {
     document.getElementById('retryYes').focus();
   });
   document.getElementById('retryNo').addEventListener('click', close);
+  // 頁內（非 modal）確認面板：不鎖焦點，但支援 Escape 取消。
+  panel.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') close();
+  });
   document.getElementById('retryYes').addEventListener('click', onRetry);
 }
 

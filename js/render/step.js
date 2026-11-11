@@ -9,7 +9,7 @@ function stepSectionHtml() {
       <h2 class="stitle" id="stepTitle">👟 今天走了幾步？</h2>
       <div class="step-row">
         <label for="si" class="visually-hidden">今日步數</label>
-        <input type="number" id="si" placeholder="例：4500" min="0" max="${MAX_STEPS}" inputmode="numeric" aria-describedby="db">
+        <input type="number" id="si" placeholder="例：4500" min="0" max="${MAX_STEPS}" inputmode="numeric" aria-describedby="stepErr db">
         <span class="step-unit" aria-hidden="true">步</span>
       </div>
       <div id="stepErr" class="form-error" role="alert"></div>

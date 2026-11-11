@@ -71,3 +71,14 @@ test('styles.css：輸入框聚焦時不移除焦點外框', async () => {
   const css = await readFile(new URL('../css/styles.css', import.meta.url), 'utf8');
   assert.ok(!/outline:\s*none/.test(css));
 });
+
+test('buildStepHtml：步數輸入框以 aria-describedby 關聯錯誤提示', () => {
+  const html = buildStepHtml({ total: 0, streak: 0, lastDate: null, log: [] });
+  assert.match(html, /id="si"[^>]*aria-describedby="stepErr db"/);
+});
+
+test('buildCompleteHtml：確認面板為頁內群組（非 modal），不宣告 alertdialog', () => {
+  const html = buildCompleteHtml('2026-06-10', data, 3, 35, diff, hist, '🟢 🟢 🟢');
+  assert.match(html, /id="retryConfirm" role="group"/);
+  assert.ok(!html.includes('alertdialog'));
+});
