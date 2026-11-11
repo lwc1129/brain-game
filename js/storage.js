@@ -48,8 +48,12 @@ export function saveHistory(hist) {
 }
 
 // ── 近期出題記錄：避免熟客連日遇到重複題目 ──────────────────────────────
-// 每個難度各自保留最近 60 題（約 20 天份量），抽題時優先排除。
-const RECENT_LIMIT = 60;
+// 每個難度各自保留最近 RECENT_LIMIT 題，抽題時優先排除（pickQuestions 的 fresh-first）。
+// 240 題 = 每天 3 題 × 80 天：每週題庫只換約 8–10 題（每難度上限 300 題），
+// 60 題（20 天）的舊值會讓每天玩的長輩 3 週後就開始遇到重複題。
+// 必須小於每難度題庫題數（MAX_PER_DIFFICULTY = 300），否則 fresh 題池會被排空；
+// 即使排空，pickQuestions 也會回頭使用近期題，保證抽得滿。儲存成本約 10KB / 難度。
+export const RECENT_LIMIT = 240;
 
 export function loadRecentQuestionTexts(diffKey) {
   const list = readJson(`recent:${diffKey}`);
