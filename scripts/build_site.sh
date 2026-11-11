@@ -7,7 +7,7 @@
 set -euo pipefail
 
 OUT="${1:-_site}"
-SITE_FILES=(index.html .nojekyll questions.json)
+SITE_FILES=(index.html .nojekyll questions.json manifest.webmanifest sw.js)
 SITE_DIRS=(css js assets)
 
 cd "$(dirname "$0")/.."

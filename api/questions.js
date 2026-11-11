@@ -39,6 +39,40 @@ export const GEMINI_TIMEOUT_MS = 7_000;
 // 跨實例共享狀態。若需嚴格的全域限流，應改接 Vercel KV / Upstash Redis。
 const _hits = new Map();
 
+// ── 題目快取（單實例、記憶體）──────────────────────────────────────────────
+// 同一天（台灣時間）、同難度先累積 QUESTION_CACHE_SETS 組 Gemini 題目，之後的請求
+// 從中隨機挑一組回傳，不再呼叫 Gemini：回應更快、Gemini 配額與被濫用的成本下降。
+// 取捨：同一天可能有人拿到相同題組（重新挑戰也可能重複）；快取只存在熱實例，
+// 冷啟動會重新累積。若需跨實例共享，改接 Vercel KV / Upstash Redis。
+// 快取放在 origin、enum、rate limit 檢查之後，四項防線不受影響。
+export const QUESTION_CACHE_SETS = 5;
+const _questionCache = new Map();
+
+// 台灣日期鍵（YYYY-MM-DD），與前端以使用者當地日期換日的時機一致。
+export function taipeiDateKey(now = new Date()) {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(now);
+}
+
+// 純函式：題組已累積滿 maxSets 時隨機回傳其中一組，否則回傳 null（需要呼叫 Gemini）。
+export function pickCachedSet(store, key, maxSets, rand = Math.random) {
+  const sets = store.get(key);
+  if (!sets || sets.length < maxSets) return null;
+  return sets[Math.floor(rand() * sets.length)];
+}
+
+// 純函式：加入一組題目，並移除非 today 的舊鍵，確保記憶體只保留當天資料。
+export function addCachedSet(store, key, today, questions, maxSets) {
+  for (const k of store.keys()) if (!k.startsWith(`${today}:`)) store.delete(k);
+  const sets = store.get(key) || [];
+  if (sets.length < maxSets) sets.push(questions);
+  store.set(key, sets);
+}
+
+// 測試用：重設模組層級的題目快取，避免測試之間互相影響。
+export function resetQuestionCache() {
+  _questionCache.clear();
+}
+
 function rateLimitConfig() {
   const max = Number(process.env.RATE_LIMIT_MAX);
   const windowMs = Number(process.env.RATE_LIMIT_WINDOW_MS);
@@ -305,6 +339,22 @@ export default async function handler(req, res) {
 
   if (!process.env.GEMINI_API_KEY) return res.status(503).json({ error: 'proxy not configured' });
 
+  const today = taipeiDateKey();
+  const cacheKey = `${today}:${difficulty}`;
+  const cached = pickCachedSet(_questionCache, cacheKey, QUESTION_CACHE_SETS);
+  if (cached) {
+    console.log(
+      JSON.stringify({
+        level: 'info',
+        ts: new Date().toISOString(),
+        msg: '題目快取命中',
+        ctx: { diffKey: difficulty, cacheKey, sets: _questionCache.get(cacheKey).length },
+      })
+    );
+    res.setHeader('X-Cache', 'HIT');
+    return res.status(200).json({ questions: cached });
+  }
+
   // fetch 逾時（TimeoutError）、網路錯誤、回應 body 非 JSON 都會丟例外；
   // 一律記錄結構化 log 並回 502，避免未處理例外變成無 log 的 500。
   let questions;
@@ -327,5 +377,7 @@ export default async function handler(req, res) {
     return res.status(502).json({ error: 'generation failed' });
   }
   if (!questions) return res.status(502).json({ error: 'generation failed' });
+  addCachedSet(_questionCache, cacheKey, today, questions, QUESTION_CACHE_SETS);
+  res.setHeader('X-Cache', 'MISS');
   return res.status(200).json({ questions });
 }

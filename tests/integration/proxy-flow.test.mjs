@@ -1,8 +1,10 @@
 // Proxy 整合測試：模擬完整請求序列（mock fetch，不發真實網路請求）。
-import { test } from 'node:test';
+import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 
-import handler from '../../api/questions.js';
+import handler, { resetQuestionCache } from '../../api/questions.js';
+
+beforeEach(() => resetQuestionCache());
 
 function makeQuestion(text = '1 + 1 = ？') {
   return { type: '計算', q: text, a: '2', opts: ['2', '3', '1', '4'] };

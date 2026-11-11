@@ -12,6 +12,7 @@ import {
   pickQuestions,
   QUESTIONS_PER_DAY,
   revertDailyResult,
+  settleWithin,
   shuffleOptions,
   yesterdayKey,
 } from './logic.js';
@@ -46,9 +47,14 @@ let _loadingMsgTimer = null;
 // 出題請求進行中時不換日，避免 await 回來後把題目寫進新一天的 _data。
 let _starting = false;
 
+// 按「開始」時題庫若還在下載，最多等這麼久，逾時就先用內建題庫，不讓長輩卡在畫面上。
+const BANK_WAIT_MS = 3000;
+
+// 題庫在背景下載，不擋首次畫面。no-cache：每次向伺服器確認（ETag），
+// 沒變就用瀏覽器快取，不必每次重新下載 284KB。
 async function fetchQuestionBank() {
   try {
-    const r = await fetch('./questions.json', { cache: 'no-store' });
+    const r = await fetch('./questions.json', { cache: 'no-cache' });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const data = await r.json();
     if (!isValidQuestionBank(data)) {
@@ -61,6 +67,13 @@ async function fetchQuestionBank() {
     console.warn('questions.json 載入失敗，使用內建題庫：', e.message || e);
     logError('fetchQuestionBank', e);
   }
+}
+
+let _bankReady = Promise.resolve();
+
+async function waitForBank() {
+  const r = await settleWithin(_bankReady, BANK_WAIT_MS);
+  if (!r.done) logError('waitForBank', new Error(`questions.json 超過 ${BANK_WAIT_MS}ms 未載入，先用內建題庫`));
 }
 
 function pickFromBank(diffKey) {
@@ -166,6 +179,8 @@ function renderStep() {
 }
 
 async function handleStartGame() {
+  // 出題中（等 AI 或背景題庫）再按開始一律忽略，避免兩次出題寫進同一份 _data。
+  if (_starting) return;
   // 步數頁停留跨過午夜後才按開始：先換日，成績才會記在正確的日期。
   if (syncToday() && _data.completed) {
     render();
@@ -178,10 +193,18 @@ async function handleStartGame() {
   }
   const diff = getDiff(v);
   _starting = true;
+  // 等待期間鎖住按鈕與輸入框，讓長輩知道已經按到了，也避免改步數造成難度與題目不一致。
+  const btn = document.getElementById('startBtn');
+  const input = document.getElementById('si');
+  btn.disabled = true;
+  input.disabled = true;
   try {
     await startGame(v, diff);
   } finally {
     _starting = false;
+    // startGame 成功時已換到題目畫面；只有仍停在步數頁時才需要解鎖。
+    if (btn.isConnected) btn.disabled = false;
+    if (input.isConnected) input.disabled = false;
   }
 }
 
@@ -198,9 +221,11 @@ async function startGame(v, diff) {
       _data.questions = shuffleOptions(aiQs);
       _data.aiGenerated = true;
     } else {
+      await waitForBank();
       _data.questions = pickFromBank(diff.key);
     }
   } else {
+    await waitForBank();
     _data.questions = pickFromBank(diff.key);
   }
   saveTodayData(TODAY, _data);
@@ -301,4 +326,14 @@ async function init() {
   });
 }
 
-fetchQuestionBank().then(init);
+// 註冊 service worker：可加到主畫面、離線時用快取遊玩（見 sw.js）。
+// 註冊失敗不影響遊戲，只記錄 log。
+function registerServiceWorker() {
+  if (!('serviceWorker' in navigator)) return;
+  navigator.serviceWorker.register('./sw.js').catch((e) => logError('registerServiceWorker', e));
+}
+
+// 先畫出畫面，題庫在背景下載（見 waitForBank）。
+_bankReady = fetchQuestionBank();
+init();
+registerServiceWorker();
