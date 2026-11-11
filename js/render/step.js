@@ -9,9 +9,10 @@ function stepSectionHtml() {
       <h2 class="stitle" id="stepTitle">👟 今天走了幾步？</h2>
       <div class="step-row">
         <label for="si" class="visually-hidden">今日步數</label>
-        <input type="number" id="si" placeholder="例：4500" min="0" max="${MAX_STEPS}" inputmode="numeric" aria-describedby="db">
+        <input type="number" id="si" placeholder="例：4500" min="0" max="${MAX_STEPS}" inputmode="numeric" aria-describedby="stepErr db">
         <span class="step-unit" aria-hidden="true">步</span>
       </div>
+      <div id="stepErr" class="form-error" role="alert"></div>
       <div id="db" class="diff-badge" style="display:none;" aria-live="polite"></div>
       <button class="btn-main" id="startBtn">開始今日挑戰</button>
     </section>`;
@@ -29,9 +30,26 @@ export function buildStepHtml(hist) {
   return `${histH}${stepSectionHtml()}${logH}${footnoteHtml()}`;
 }
 
+// 步數不合法時的頁內提示（取代 alert：原生對話框字小，也不跟著字體縮放）。
+export const STEP_ERROR_MSG = `請輸入 0 到 ${MAX_STEPS.toLocaleString()} 之間的步數`;
+
+export function showStepError(msg = STEP_ERROR_MSG) {
+  const el = document.getElementById('stepErr');
+  el.textContent = msg;
+  el.classList.add('show');
+  document.getElementById('si').focus();
+}
+
+function clearStepError() {
+  const el = document.getElementById('stepErr');
+  el.textContent = '';
+  el.classList.remove('show');
+}
+
 export function bindStepInput(prefetch, getDiff, aiEnabled) {
   let prefetchTimer = null;
   document.getElementById('si').addEventListener('input', function () {
+    clearStepError();
     const v = parseInt(this.value, 10);
     const db = document.getElementById('db');
     if (!isNaN(v) && v >= 0 && v <= MAX_STEPS) {
