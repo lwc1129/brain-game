@@ -1,5 +1,6 @@
 import { statRowHtml, historyRowsHtml, qSourceLabel, sourceBannerHtml } from './helpers.js';
 import { QUESTIONS_PER_DAY, shareMsg } from '../logic.js';
+import { logError } from '../logger.js';
 
 export const COPY_FEEDBACK_MS = 2000;
 
@@ -88,10 +89,13 @@ function copyShareText(txt) {
     .then(() => {
       b.textContent = '✅ 已複製！';
       setTimeout(() => {
-        b.textContent = shareButtonLabel(false);
+        b.textContent = shareButtonLabel(canNativeShare());
       }, COPY_FEEDBACK_MS);
     })
-    .catch(() => showCopyFallback(txt));
+    .catch((e) => {
+      logError('copyShareText', e);
+      showCopyFallback(txt);
+    });
 }
 
 function shareResult(txt) {
@@ -101,7 +105,9 @@ function shareResult(txt) {
   }
   navigator.share({ text: txt }).catch((e) => {
     // 使用者自己關掉分享選單（AbortError）不算錯誤；其他失敗改走複製。
-    if (e?.name !== 'AbortError') copyShareText(txt);
+    if (e?.name === 'AbortError') return;
+    logError('shareResult', e);
+    copyShareText(txt);
   });
 }
 
