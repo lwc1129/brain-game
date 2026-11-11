@@ -249,3 +249,31 @@ test('e2e [pwa-manifest]：manifest 圖示存在且尺寸正確，頁面有連�
   const html = readFileSync(join(siteDir, 'index.html'), 'utf8');
   assert.ok(html.includes('<link rel="manifest" href="./manifest.webmanifest">'));
 });
+
+test('e2e [double-start]：題庫還在下載時連按開始，只會出一次題', async () => {
+  const ctx = await browser.newContext({ ...devices['iPhone 13'], serviceWorkers: 'block' });
+  const page = await ctx.newPage();
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  try {
+    await ctx.route(/^https?:\/\/(?!127\.0\.0\.1)/, (route) => route.abort());
+    // 讓題庫晚 1.5 秒才回應，模擬慢網路下按開始時題庫還沒到
+    await ctx.route('**/questions.json', async (route) => {
+      await new Promise((r) => setTimeout(r, 1500));
+      await route.continue();
+    });
+    await page.goto(baseUrl);
+    await page.waitForSelector('#si');
+    await page.fill('#si', '4500');
+    await page.click('#startBtn');
+    await page.click('#startBtn', { force: true, timeout: 2000 }).catch(() => {});
+    await page.waitForSelector('.q-text', { timeout: 10000 });
+    await page.waitForTimeout(2500);
+    // 每出一次題，近期出題記錄就多 3 題；連按兩次若都出題會變成 6
+    const recent = await page.evaluate(() => JSON.parse(localStorage.getItem('brain-game:recent:easy') || '[]'));
+    assert.equal(recent.length, 3, `近期出題記錄有 ${recent.length} 題，代表出題了不只一次`);
+    assert.deepEqual(errors, []);
+  } finally {
+    await ctx.close();
+  }
+});

@@ -179,6 +179,8 @@ function renderStep() {
 }
 
 async function handleStartGame() {
+  // 出題中（等 AI 或背景題庫）再按開始一律忽略，避免兩次出題寫進同一份 _data。
+  if (_starting) return;
   // 步數頁停留跨過午夜後才按開始：先換日，成績才會記在正確的日期。
   if (syncToday() && _data.completed) {
     render();
@@ -191,10 +193,18 @@ async function handleStartGame() {
   }
   const diff = getDiff(v);
   _starting = true;
+  // 等待期間鎖住按鈕與輸入框，讓長輩知道已經按到了，也避免改步數造成難度與題目不一致。
+  const btn = document.getElementById('startBtn');
+  const input = document.getElementById('si');
+  btn.disabled = true;
+  input.disabled = true;
   try {
     await startGame(v, diff);
   } finally {
     _starting = false;
+    // startGame 成功時已換到題目畫面；只有仍停在步數頁時才需要解鎖。
+    if (btn.isConnected) btn.disabled = false;
+    if (input.isConnected) input.disabled = false;
   }
 }
 
