@@ -227,7 +227,8 @@ test('e2e [pwa-precache]：sw.js 的 PRECACHE 涵蓋所有網站檔案，且每�
     readdirSync(join(siteDir, dir), { withFileTypes: true }).flatMap((d) =>
       d.isDirectory() ? walk(`${dir}/${d.name}`) : [`${dir}/${d.name}`]
     );
-  for (const f of [...walk('js'), ...walk('css'), 'index.html', 'questions.json', 'manifest.webmanifest']) {
+  const manifestIcons = JSON.parse(readFileSync(join(siteDir, 'manifest.webmanifest'), 'utf8')).icons.map((i) => i.src);
+  for (const f of [...walk('js'), ...walk('css'), 'index.html', 'questions.json', 'manifest.webmanifest', ...manifestIcons]) {
     assert.ok(entries.has(f), `${f} 沒有列在 sw.js 的 PRECACHE，離線時會缺檔`);
   }
 });
@@ -273,6 +274,42 @@ test('e2e [double-start]：題庫還在下載時連按開始，只會出一次�
     const recent = await page.evaluate(() => JSON.parse(localStorage.getItem('brain-game:recent:easy') || '[]'));
     assert.equal(recent.length, 3, `近期出題記錄有 ${recent.length} 題，代表出題了不只一次`);
     assert.deepEqual(errors, []);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test('e2e [pwa-prune]：新版 sw.js 啟用時，清掉快取中已不在 PRECACHE 的舊檔', async () => {
+  const ctx = await browser.newContext({ ...devices['iPhone 13'], serviceWorkers: 'allow' });
+  const page = await ctx.newPage();
+  try {
+    await ctx.route(/^https?:\/\/(?!127\.0\.0\.1)/, (route) => route.abort());
+    let version = 1;
+    const swSource = readFileSync(join(siteDir, 'sw.js'), 'utf8');
+    await ctx.route('**/sw.js', (route) =>
+      route.fulfill({ contentType: 'text/javascript', body: `${swSource}\n// test-version ${version}\n` })
+    );
+    await page.goto(baseUrl);
+    await page.waitForFunction(() => navigator.serviceWorker.controller !== null || navigator.serviceWorker.ready, null, { timeout: 10000 });
+    await page.evaluate(() => navigator.serviceWorker.ready);
+    // 模擬某次部署留下、之後已改名刪除的舊檔
+    await page.evaluate(async () => {
+      const c = await caches.open('brain-game-v1');
+      await c.put(new URL('./js/old-module.js', location.href).href, new Response('old'));
+    });
+    assert.ok(await page.evaluate(async () => !!(await (await caches.open('brain-game-v1')).match('./js/old-module.js'))));
+    // 部署新版 sw.js → 瀏覽器安裝並啟用新的 SW
+    version = 2;
+    await page.evaluate(async () => {
+      const reg = await navigator.serviceWorker.getRegistration();
+      await reg.update();
+      const sw = reg.installing || reg.waiting;
+      if (sw) await new Promise((r) => sw.addEventListener('statechange', () => sw.state === 'activated' && r()));
+    });
+    const stale = await page.evaluate(async () => !!(await (await caches.open('brain-game-v1')).match('./js/old-module.js')));
+    const kept = await page.evaluate(async () => !!(await (await caches.open('brain-game-v1')).match('./js/app.js')));
+    assert.equal(stale, false, '已不在 PRECACHE 的舊檔應被清除');
+    assert.equal(kept, true, 'PRECACHE 內的檔案應保留');
   } finally {
     await ctx.close();
   }
