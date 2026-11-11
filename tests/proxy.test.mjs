@@ -2,7 +2,7 @@
 // 涵蓋：限流純函式、CORS、method / difficulty 驗證、限流 429、
 // 以及成功 / 失敗的 Gemini 呼叫路徑（以 mock fetch 模擬）。
 // 執行：node --test tests/
-import { test } from 'node:test';
+import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 
 import handler, {
@@ -14,10 +14,18 @@ import handler, {
   isValidQuestions,
   pickPromptTypes,
   pruneStore,
+  QUESTION_CACHE_SETS,
   QUESTION_TYPES,
   RESPONSE_SCHEMA,
+  addCachedSet,
+  pickCachedSet,
+  resetQuestionCache,
+  taipeiDateKey,
 } from '../api/questions.js';
 import { QUESTION_TYPES as LOGIC_QUESTION_TYPES } from '../js/logic.js';
+
+// 題目快取是模組層級狀態，每個測試前重設，避免先前成功的請求讓後面的測試命中快取。
+beforeEach(() => resetQuestionCache());
 
 // ── 測試輔助 ───────────────────────────────────────────────────────────────
 function makeQuestion(text = '1 + 1 = ？') {
@@ -651,4 +659,132 @@ test('handler：Gemini 回傳算錯的純算式題時回 502', async () => {
   const { res, errors } = await runWithFetch(geminiOk([wrong, makeQuestion('b？'), makeQuestion('c？')]));
   assert.equal(res.statusCode, 502);
   assert.ok(errors.some((m) => m.includes('isValidQuestions 驗證失敗')));
+});
+
+// ── 題目快取 ─────────────────────────────────────────────────────────────
+test('taipeiDateKey：以台灣時間換日（UTC 16:00 已是台灣隔天）', () => {
+  assert.equal(taipeiDateKey(new Date('2026-06-10T15:59:59Z')), '2026-06-10');
+  assert.equal(taipeiDateKey(new Date('2026-06-10T16:00:00Z')), '2026-06-11');
+});
+
+test('pickCachedSet：題組未累積滿時回傳 null，滿了才隨機挑一組', () => {
+  const store = new Map();
+  const key = '2026-06-10:easy';
+  assert.equal(pickCachedSet(store, key, 2), null);
+  addCachedSet(store, key, '2026-06-10', ['a'], 2);
+  assert.equal(pickCachedSet(store, key, 2), null);
+  addCachedSet(store, key, '2026-06-10', ['b'], 2);
+  assert.deepEqual(pickCachedSet(store, key, 2, () => 0), ['a']);
+  assert.deepEqual(pickCachedSet(store, key, 2, () => 0.99), ['b']);
+});
+
+test('addCachedSet：超過上限不再加入，且會清掉非今天的舊鍵', () => {
+  const store = new Map([['2026-06-09:easy', [['old']]]]);
+  for (let i = 0; i < 4; i++) addCachedSet(store, '2026-06-10:easy', '2026-06-10', [String(i)], 3);
+  assert.equal(store.get('2026-06-10:easy').length, 3);
+  assert.ok(!store.has('2026-06-09:easy'));
+});
+
+function countingGemini() {
+  let calls = 0;
+  let n = 0;
+  const impl = async () => {
+    calls += 1;
+    n += 1;
+    return geminiOk([makeQuestion(`${n}a？`), makeQuestion(`${n}b？`), makeQuestion(`${n}c？`)])();
+  };
+  return { impl, calls: () => calls };
+}
+
+async function callHandler(difficulty = 'easy') {
+  const res = makeRes();
+  await handler(makeReq({ ip: freshIp(), body: { difficulty } }), res);
+  return res;
+}
+
+test('handler：累積滿 QUESTION_CACHE_SETS 組後，同難度不再呼叫 Gemini 並標記 X-Cache: HIT', async () => {
+  const prev = process.env.GEMINI_API_KEY;
+  process.env.GEMINI_API_KEY = 'test-key';
+  const origLog = console.log;
+  const logs = [];
+  console.log = (m) => logs.push(m);
+  const g = countingGemini();
+  const restore = stubFetch(g.impl);
+  try {
+    for (let i = 0; i < QUESTION_CACHE_SETS; i++) {
+      const res = await callHandler('easy');
+      assert.equal(res.statusCode, 200);
+      assert.equal(res.headers['x-cache'], 'MISS');
+    }
+    assert.equal(g.calls(), QUESTION_CACHE_SETS);
+    const hit = await callHandler('easy');
+    assert.equal(hit.statusCode, 200);
+    assert.equal(hit.headers['x-cache'], 'HIT');
+    assert.equal(g.calls(), QUESTION_CACHE_SETS, '命中快取不應再呼叫 Gemini');
+    assert.equal(hit.body.questions.length, 3);
+    const entry = JSON.parse(logs.find((m) => m.includes('題目快取命中')));
+    assert.equal(entry.level, 'info');
+    assert.equal(entry.ctx.diffKey, 'easy');
+    // 其他難度各自累積，不共用快取
+    const other = await callHandler('hard');
+    assert.equal(other.headers['x-cache'], 'MISS');
+    assert.equal(g.calls(), QUESTION_CACHE_SETS + 1);
+  } finally {
+    restore();
+    console.log = origLog;
+    if (prev !== undefined) process.env.GEMINI_API_KEY = prev;
+    else delete process.env.GEMINI_API_KEY;
+  }
+});
+
+test('handler：Gemini 失敗的結果不會進快取', async () => {
+  const prev = process.env.GEMINI_API_KEY;
+  process.env.GEMINI_API_KEY = 'test-key';
+  const origErr = console.error;
+  const origLog = console.log;
+  console.error = () => {};
+  console.log = () => {};
+  const restore = stubFetch(async () => ({ ok: false, status: 503, statusText: 'x', json: async () => ({}) }));
+  try {
+    for (let i = 0; i < QUESTION_CACHE_SETS + 1; i++) {
+      assert.equal((await callHandler('medium')).statusCode, 502);
+    }
+  } finally {
+    restore();
+    console.error = origErr;
+    console.log = origLog;
+    if (prev !== undefined) process.env.GEMINI_API_KEY = prev;
+    else delete process.env.GEMINI_API_KEY;
+  }
+});
+
+test('handler：快取命中仍受限流保護（限流在快取之前）', async () => {
+  const prev = { key: process.env.GEMINI_API_KEY, max: process.env.RATE_LIMIT_MAX };
+  process.env.GEMINI_API_KEY = 'test-key';
+  process.env.RATE_LIMIT_MAX = '1';
+  const origLog = console.log;
+  const origWarn = console.warn;
+  console.log = () => {};
+  console.warn = () => {};
+  const restore = stubFetch(countingGemini().impl);
+  try {
+    // 先用不同 IP 把快取累積滿，確保第二個請求「本來可以命中快取」
+    for (let i = 0; i < QUESTION_CACHE_SETS; i++) await callHandler('easy');
+    const ip = freshIp();
+    const first = makeRes();
+    await handler(makeReq({ ip }), first);
+    const second = makeRes();
+    await handler(makeReq({ ip }), second);
+    assert.equal(first.statusCode, 200);
+    assert.equal(first.headers['x-cache'], 'HIT');
+    assert.equal(second.statusCode, 429);
+  } finally {
+    restore();
+    console.log = origLog;
+    console.warn = origWarn;
+    for (const [k, env] of [['key', 'GEMINI_API_KEY'], ['max', 'RATE_LIMIT_MAX']]) {
+      if (prev[k] !== undefined) process.env[env] = prev[k];
+      else delete process.env[env];
+    }
+  }
 });

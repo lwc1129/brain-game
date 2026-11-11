@@ -7,7 +7,7 @@
 - `npm run test:e2e`：瀏覽器端到端 smoke test（需 playwright；CI 以 `npm install --no-save` 安裝，不寫入 `package.json`）
 - `python -m unittest test_generate_questions test_difficulty_eval -v`（乾淨環境若沒有 `python` 指令，改用 `python3`）
 
-**部署內容：** GitHub Pages 只上傳 `scripts/build_site.sh` 組出的 `_site/`（`index.html`、`css/`、`js/`、`assets/`、`questions.json`）。新增前端執行期檔案時必須同步更新該腳本，否則 e2e 的 `site-files` 測試會失敗。
+**部署內容：** GitHub Pages 只上傳 `scripts/build_site.sh` 組出的 `_site/`（`index.html`、`css/`、`js/`、`assets/`、`questions.json`、`manifest.webmanifest`、`sw.js`）。新增前端執行期檔案時必須同步更新該腳本與 `sw.js` 的 `PRECACHE`，否則 e2e 的 `site-files` / `pwa-precache` 測試會失敗。
 
 ---
 
@@ -68,6 +68,7 @@ console.error(JSON.stringify({
 | isValidQuestions 驗證失敗 | `error` | `diffKey`, `count` |
 | 成功回應 | `info` | `diffKey`, `count` |
 | Gemini 呼叫例外（逾時、網路錯誤、body 非 JSON） | `error` | `diffKey`, `errorName`, `error`, `timeoutMs` |
+| 題目快取命中（未呼叫 Gemini） | `info` | `diffKey`, `cacheKey`, `sets` |
 
 ### 前端（`js/` 各模組）
 
@@ -173,6 +174,9 @@ FAIL [streak-10]: 連續天數計算錯誤 — 預期 10，實際 0
 | `xss` | 題庫中的惡意字串只顯示為文字 |
 | `xl-font` | 特大字體下無水平捲動 |
 | `site-files` | `index.html` 引用的檔案都在部署內容中 |
+| `offline` | 載入過一次後斷網，仍能開啟並玩完一輪（service worker） |
+| `pwa-precache` | `sw.js` 的 `PRECACHE` 涵蓋所有網站檔案；新增 js / css 檔案必須同步加入 |
+| `pwa-manifest` | manifest 圖示存在且實際尺寸正確 |
 
 每個 e2e 測試都會斷言：無 page error、無原生 `alert` / `confirm` / `prompt`、無 404。
 
@@ -249,6 +253,8 @@ Labels: ops, auto
 | `GEMINI_TIMEOUT_MS` | `api/questions.js` | 7,000 ms | 必須小於 `FETCH_TIMEOUT_MS`，讓 proxy 先放棄並留下 log（有測試鎖住） |
 | `GEMINI_MAX_OUTPUT_TOKENS` | `api/questions.js` | 1,024 | 搭配 `thinkingBudget: 0`；調低可能截斷 JSON |
 | `RECENT_LIMIT` | `js/storage.js` | 240 題 | 每難度「近期出過」記錄；必須小於題庫每難度上限 300 |
+| `QUESTION_CACHE_SETS` | `api/questions.js` | 5 組 | 同日同難度累積幾組 Gemini 題目後改從快取隨機回傳；調高 = 題目更多樣但 Gemini 用量增加。快取在 origin / enum / rate limit 之後（有測試鎖住順序），單實例記憶體，冷啟動重新累積 |
+| `BANK_WAIT_MS` | `js/app.js` | 3,000 ms | 按開始時最多等背景題庫多久，逾時改用內建題庫 |
 
 位置不寫行號，避免程式碼變動後失準；以常數名稱搜尋即可。
 
