@@ -70,3 +70,32 @@ jobs:
             }
             console.log('questions.json 驗證通過');
           "
+
+  # 端到端 smoke test：以真實 Chromium 操作 scripts/build_site.sh 產出的網站（即實際部署內容）。
+  # playwright 只在 CI 以 --no-save 安裝，不寫入 package.json，網站維持零 npm 依賴。
+  e2e-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Overlay generated questions.json
+        if: inputs.questions_artifact != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.questions_artifact }}
+          path: .
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install Playwright (CI only)
+        run: |
+          npm install --no-save playwright@1.63.0
+          npx playwright install --with-deps chromium
+
+      - name: Run e2e smoke tests
+        run: npm run test:e2e

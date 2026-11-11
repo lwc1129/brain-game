@@ -15,16 +15,18 @@ js/
   storage.js                localStorage 存取（含近期出題記錄、字體偏好）
   ai.js                     AI 出題（一律經由後端 proxy，前端無金鑰）
   analytics.js              GA4 事件
-  app.js                    畫面渲染與事件繫結（進入點）
+  logger.js                 結構化錯誤 log（logError）
+  app.js                    狀態流程與畫面切換（進入點）
+  render/                   各畫面的 HTML 產生與事件繫結（步數、題目、完成頁、載入中）
 tests/
-  logic.test.mjs            前端遊戲邏輯單元測試（node --test）
-  proxy.test.mjs            AI proxy 單元測試（涵蓋限流、CORS、handler）
-  ai.test.mjs               AI 出題模組測試（mock fetch）
+  *.test.mjs                單元測試（邏輯、proxy、AI、storage、render）
   integration/              整合測試（遊戲流程 profile + proxy 序列）
+  e2e/                      瀏覽器端到端 smoke test（Playwright）
+scripts/build_site.sh       組出 GitHub Pages 要公開的 _site/（只含網站執行期檔案）
 api/questions.js            Vercel Serverless Function：Gemini API 代理（金鑰保管處）
 generate_questions.py       每週題庫擴充腳本（合併＋去重＋上限）
 seed_questions.py           一次性種題腳本（把各難度補滿到 300 題，可重現）
-test_generate_questions.py  題庫腳本單元測試（20 個測試）
+test_generate_questions.py  題庫腳本單元測試
 questions.json              動態題庫（GitHub Actions 每週自動擴充）
 ```
 
@@ -93,15 +95,17 @@ python3 -m http.server 8000   # 開啟 http://localhost:8000
 執行測試：
 
 ```bash
-python -m unittest test_generate_questions -v   # 題庫腳本（20 個測試）
-node --test tests/*.test.mjs                    # 前端邏輯 + proxy（共 40 個測試）
+npm test                                         # 單元 + 整合測試
+npm run test:e2e                                 # 瀏覽器 e2e（需先 npm install --no-save playwright）
+python3 -m unittest test_generate_questions test_difficulty_eval -v   # 題庫腳本
 ```
 
-CI（`.github/workflows/test.yml`）會在 push / PR 時跑上述測試，
+CI（`.github/workflows/test.yml`）會在 push / PR 時跑上述三組測試，
 並驗證 `questions.json` 符合前端題庫 schema。
 
 ## 部署
 
-- push 到 `main` 後由 `.github/workflows/deploy.yml` 部署至 GitHub Pages。
+- push 到 `main` 後由 `.github/workflows/deploy.yml` 部署至 GitHub Pages；
+  只上傳 `scripts/build_site.sh` 組出的 `_site/`，測試、eval、Python 腳本與 `api/` 不公開。
 - 每週日 UTC 19:00（台灣週一凌晨 03:00）由 `.github/workflows/update_questions.yml`
   自動擴充題庫。
