@@ -11,13 +11,16 @@
 
 // isValidQuestions 與前端 js/logic.js 共用，避免 proxy 與前端驗證邏輯漂移。
 // Vercel serverless 可直接 import 同 repo 的 ES module。
-import { isValidQuestions } from '../js/logic.js';
+import { isValidQuestions, QUESTION_TYPES } from '../js/logic.js';
 
-export { isValidQuestions };
+export { isValidQuestions, QUESTION_TYPES };
 
 const DIFFICULTIES = new Set(['hard', 'medium', 'easy', 'super_easy']);
 const QUESTIONS_PER_DAY = 3;
 const MODEL_NAME = 'gemini-2.5-flash';
+// 輸出 token 上限。gemini-2.5-flash 預設會先「思考」，思考 token 也計入此上限，
+// 512 時常把 3 題中文 JSON 截斷成解析失敗；因此關閉思考（thinkingBudget: 0）並放寬上限。
+export const GEMINI_MAX_OUTPUT_TOKENS = 1024;
 const DEFAULT_ALLOWED_ORIGINS = 'https://lwc1129.github.io';
 
 // 預設限流：每個來源 60 秒內最多 30 次。可由環境變數覆寫。
@@ -25,6 +28,9 @@ const DEFAULT_RATE_LIMIT_MAX = 30;
 const DEFAULT_RATE_LIMIT_WINDOW_MS = 60_000;
 // 限流表的鍵數量上限，超過時觸發清掃，避免記憶體無限成長。
 const MAX_TRACKED_KEYS = 10_000;
+// Gemini 呼叫逾時。必須小於前端 FETCH_TIMEOUT_MS（js/ai.js，8000ms），
+// 讓 proxy 先放棄並回 502 + 結構化 log，而不是前端先 abort、後端無聲掛著。
+export const GEMINI_TIMEOUT_MS = 7_000;
 
 // 記憶體型滑動視窗限流狀態（來源 → 命中時間戳陣列）。
 //
@@ -90,16 +96,17 @@ export function pruneStore(store, now, windowMs, maxKeys) {
   for (let i = 0, n = store.size - maxKeys; i < n; i++) store.delete(byRecency[i][0]);
 }
 
+// 難度描述對齊 generate_questions.py 的認知負荷契約（Issue #37 rubric / #46 校準）：
+// 難度來自步驟數、推理鏈與記憶負荷，而不是冷僻題材或專業術語。
 const DIFF_DESC = {
-  hard: '困難（需要思考的挑戰性技術題目，考驗邏輯與計算能力）',
-  medium: '中等（需要一點思考，適合一般成人）',
-  easy: '簡單（輕鬆的題目，適合日常練習）',
-  super_easy: '超簡單（適合老年人的非常簡單題目，不要有複雜運算）',
+  hard: '困難（需要三步以上思考，例如多步混合運算、非等差數列或條件推理；用字淺白、題材貼近日常生活，不要冷僻知識或專業術語）',
+  medium: '中等（需要兩步左右的思考，例如兩位數乘個位數、先算出間距的數列、簡單日期推算）',
+  easy: '簡單（一到兩步即可作答，例如兩位數加減、明顯的等差數列、分類找不同）',
+  super_easy: '超簡單（一看就能作答，例如個位數加法、生活常識，不要有複雜運算）',
 };
 
-// 題型白名單。任何進入 prompt 的題型字串都必須出自這份清單
-// （與 generate_questions.py 的 ALLOWED_TYPES 對齊）。
-export const QUESTION_TYPES = ['邏輯', '計算', '數列', '推理', '語言', '記憶', '常識'];
+// 題型白名單 QUESTION_TYPES 定義於 js/logic.js（與 generate_questions.py 的 ALLOWED_TYPES 對齊），
+// 任何進入 prompt 的題型字串都必須出自這份清單。
 
 // 隨機挑 3 種不同題型，讓每日 AI 題目不會固定落在同一類。
 // rand 參數可注入固定值以利測試。
@@ -129,6 +136,26 @@ export function buildPrompt(diffKey, types = []) {
   );
 }
 
+// 結構化輸出 schema：要求模型直接產生符合 isValidQuestions 結構的 JSON，
+// 降低格式錯誤率。只使用 Gemini 文件長期支援的欄位（type/enum/minItems/maxItems/required/
+// propertyOrdering）；長度上限等其餘限制交給 isValidQuestions 驗證，schema 只是第一道防線。
+export const RESPONSE_SCHEMA = {
+  type: 'ARRAY',
+  minItems: QUESTIONS_PER_DAY,
+  maxItems: QUESTIONS_PER_DAY,
+  items: {
+    type: 'OBJECT',
+    properties: {
+      type: { type: 'STRING', enum: QUESTION_TYPES },
+      q: { type: 'STRING' },
+      a: { type: 'STRING' },
+      opts: { type: 'ARRAY', minItems: 4, maxItems: 4, items: { type: 'STRING' } },
+    },
+    required: ['type', 'q', 'a', 'opts'],
+    propertyOrdering: ['type', 'q', 'a', 'opts'],
+  },
+};
+
 async function callGemini(diffKey, apiKey) {
   // 指定題型是 best-effort：模型偏離指定題型時不拒絕，
   // 回應仍一律由 isValidQuestions 把關。
@@ -149,12 +176,15 @@ async function callGemini(diffKey, apiKey) {
         'Content-Type': 'application/json',
         'x-goog-api-key': apiKey,
       },
+      signal: AbortSignal.timeout(GEMINI_TIMEOUT_MS),
       body: JSON.stringify({
         contents: [{ parts: [{ text: buildPrompt(diffKey, types) }] }],
         generationConfig: {
           temperature: 0.7,
-          maxOutputTokens: 512,
+          maxOutputTokens: GEMINI_MAX_OUTPUT_TOKENS,
           responseMimeType: 'application/json',
+          responseSchema: RESPONSE_SCHEMA,
+          thinkingConfig: { thinkingBudget: 0 },
         },
       }),
     }
@@ -275,7 +305,27 @@ export default async function handler(req, res) {
 
   if (!process.env.GEMINI_API_KEY) return res.status(503).json({ error: 'proxy not configured' });
 
-  const questions = await callGemini(difficulty, process.env.GEMINI_API_KEY);
+  // fetch 逾時（TimeoutError）、網路錯誤、回應 body 非 JSON 都會丟例外；
+  // 一律記錄結構化 log 並回 502，避免未處理例外變成無 log 的 500。
+  let questions;
+  try {
+    questions = await callGemini(difficulty, process.env.GEMINI_API_KEY);
+  } catch (e) {
+    console.error(
+      JSON.stringify({
+        level: 'error',
+        ts: new Date().toISOString(),
+        msg: 'Gemini 呼叫例外',
+        ctx: {
+          diffKey: difficulty,
+          errorName: e?.name ?? 'Error',
+          error: e?.message ?? String(e),
+          timeoutMs: GEMINI_TIMEOUT_MS,
+        },
+      })
+    );
+    return res.status(502).json({ error: 'generation failed' });
+  }
   if (!questions) return res.status(502).json({ error: 'generation failed' });
   return res.status(200).json({ questions });
 }

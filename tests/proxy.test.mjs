@@ -8,12 +8,16 @@ import assert from 'node:assert/strict';
 import handler, {
   buildPrompt,
   checkRateLimit,
+  GEMINI_MAX_OUTPUT_TOKENS,
+  GEMINI_TIMEOUT_MS,
   getClientKey,
   isValidQuestions,
   pickPromptTypes,
   pruneStore,
   QUESTION_TYPES,
+  RESPONSE_SCHEMA,
 } from '../api/questions.js';
+import { QUESTION_TYPES as LOGIC_QUESTION_TYPES } from '../js/logic.js';
 
 // ── 測試輔助 ───────────────────────────────────────────────────────────────
 function makeQuestion(text = '1 + 1 = ？') {
@@ -524,4 +528,127 @@ test('handler：Gemini 回傳 markdown 包裝的 JSON 時回 200', async () => {
     if (prev !== undefined) process.env.GEMINI_API_KEY = prev;
     else delete process.env.GEMINI_API_KEY;
   }
+});
+
+// ── handler：Gemini 呼叫例外（逾時 / 網路錯誤）──────────────────────────
+async function runWithFetch(impl) {
+  const prev = process.env.GEMINI_API_KEY;
+  process.env.GEMINI_API_KEY = 'test-key';
+  const errors = [];
+  const origErr = console.error;
+  const origLog = console.log;
+  console.error = (msg) => errors.push(msg);
+  console.log = () => {};
+  const restore = stubFetch(impl);
+  try {
+    const res = makeRes();
+    await handler(makeReq({ ip: freshIp() }), res);
+    return { res, errors };
+  } finally {
+    restore();
+    console.error = origErr;
+    console.log = origLog;
+    if (prev !== undefined) process.env.GEMINI_API_KEY = prev;
+    else delete process.env.GEMINI_API_KEY;
+  }
+}
+
+test('handler：Gemini fetch 逾時時回 502 並記錄 TimeoutError', async () => {
+  const { res, errors } = await runWithFetch(async () => {
+    throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+  });
+  assert.equal(res.statusCode, 502);
+  assert.deepEqual(res.body, { error: 'generation failed' });
+  const entry = JSON.parse(errors.find((m) => m.includes('Gemini 呼叫例外')) || '{}');
+  assert.equal(entry.level, 'error');
+  assert.ok(entry.ts);
+  assert.equal(entry.ctx.diffKey, 'easy');
+  assert.equal(entry.ctx.errorName, 'TimeoutError');
+  assert.equal(entry.ctx.timeoutMs, GEMINI_TIMEOUT_MS);
+});
+
+test('handler：Gemini 網路錯誤時回 502 而非未處理例外', async () => {
+  const { res, errors } = await runWithFetch(async () => {
+    throw new TypeError('fetch failed');
+  });
+  assert.equal(res.statusCode, 502);
+  const entry = JSON.parse(errors.find((m) => m.includes('Gemini 呼叫例外')) || '{}');
+  assert.equal(entry.ctx.errorName, 'TypeError');
+  assert.equal(entry.ctx.error, 'fetch failed');
+});
+
+test('handler：Gemini 回應 body 不是 JSON 時回 502', async () => {
+  const { res, errors } = await runWithFetch(async () => ({
+    ok: true,
+    json: async () => {
+      throw new SyntaxError('Unexpected token < in JSON');
+    },
+  }));
+  assert.equal(res.statusCode, 502);
+  assert.ok(errors.some((m) => m.includes('Gemini 呼叫例外')));
+});
+
+test('handler：呼叫 Gemini 時帶上逾時 signal', async () => {
+  let seenSignal;
+  const { res } = await runWithFetch(async (_url, init) => {
+    seenSignal = init?.signal;
+    return geminiOk(threeQuestions())();
+  });
+  assert.equal(res.statusCode, 200);
+  assert.ok(seenSignal instanceof AbortSignal);
+  assert.equal(seenSignal.aborted, false);
+});
+
+test('GEMINI_TIMEOUT_MS：必須小於前端 FETCH_TIMEOUT_MS（8000ms）', () => {
+  assert.ok(GEMINI_TIMEOUT_MS > 0);
+  assert.ok(GEMINI_TIMEOUT_MS < 8000);
+});
+
+// ── Gemini 請求設定與 prompt 品質 ─────────────────────────────────────────
+test('QUESTION_TYPES：proxy 與前端共用同一份白名單', () => {
+  assert.equal(QUESTION_TYPES, LOGIC_QUESTION_TYPES);
+});
+
+test('handler：Gemini 請求關閉 thinking、放寬輸出上限並帶 responseSchema', async () => {
+  let body;
+  const { res } = await runWithFetch(async (_url, init) => {
+    body = JSON.parse(init.body);
+    return geminiOk(threeQuestions())();
+  });
+  assert.equal(res.statusCode, 200);
+  const cfg = body.generationConfig;
+  assert.equal(cfg.maxOutputTokens, GEMINI_MAX_OUTPUT_TOKENS);
+  assert.ok(GEMINI_MAX_OUTPUT_TOKENS >= 1024);
+  assert.deepEqual(cfg.thinkingConfig, { thinkingBudget: 0 });
+  assert.equal(cfg.responseMimeType, 'application/json');
+  assert.deepEqual(cfg.responseSchema, RESPONSE_SCHEMA);
+});
+
+test('RESPONSE_SCHEMA：3 題、4 選項、題型限白名單、必填欄位齊全', () => {
+  assert.equal(RESPONSE_SCHEMA.type, 'ARRAY');
+  assert.equal(RESPONSE_SCHEMA.minItems, 3);
+  assert.equal(RESPONSE_SCHEMA.maxItems, 3);
+  const item = RESPONSE_SCHEMA.items;
+  assert.deepEqual(item.required, ['type', 'q', 'a', 'opts']);
+  assert.deepEqual(item.properties.type.enum, QUESTION_TYPES);
+  assert.equal(item.properties.opts.minItems, 4);
+  assert.equal(item.properties.opts.maxItems, 4);
+});
+
+test('buildPrompt：困難題不要求「技術」題目，強調用字淺白', () => {
+  const p = buildPrompt('hard');
+  assert.ok(!p.includes('技術'));
+  assert.ok(p.includes('淺白'));
+});
+
+test('buildPrompt：四個難度描述互不相同', () => {
+  const prompts = ['hard', 'medium', 'easy', 'super_easy'].map((d) => buildPrompt(d, []));
+  assert.equal(new Set(prompts).size, 4);
+});
+
+test('handler：Gemini 回傳算錯的純算式題時回 502', async () => {
+  const wrong = { type: '計算', q: '7 × 8 = ？', a: '54', opts: ['54', '56', '58', '64'] };
+  const { res, errors } = await runWithFetch(geminiOk([wrong, makeQuestion('b？'), makeQuestion('c？')]));
+  assert.equal(res.statusCode, 502);
+  assert.ok(errors.some((m) => m.includes('isValidQuestions 驗證失敗')));
 });

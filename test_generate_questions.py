@@ -28,7 +28,10 @@ from generate_questions import (
     TYPE_CAP,
     build_prompt,
     call_gemini,
+    MAX_OPTION_LEN,
+    MAX_QUESTION_LEN,
     compute_type_counts,
+    describe_question_defect,
     filter_valid_generated_questions,
     merge_question_banks,
     normalize_question_text,
@@ -171,6 +174,41 @@ class TestValidateQuestions(unittest.TestCase):
         data["hard"][0] = "not-a-dict"
         with self.assertRaises(ValueError):
             validate_questions(data)
+
+
+class TestDescribeQuestionDefect(unittest.TestCase):
+    """單題規則需與前端 js/logic.js 的 isValidQuestion 對齊。"""
+
+    def test_valid_question_has_no_defect(self):
+        self.assertIsNone(describe_question_defect(_make_question()))
+
+    def test_type_outside_whitelist_is_defect(self):
+        q = {**_make_question(), "type": "腦筋急轉彎"}
+        self.assertIn("題型白名單", describe_question_defect(q))
+
+    def test_question_over_length_limit_is_defect(self):
+        self.assertIsNone(describe_question_defect({**_make_question(), "q": "字" * MAX_QUESTION_LEN}))
+        q = {**_make_question(), "q": "字" * (MAX_QUESTION_LEN + 1)}
+        self.assertIn("長度上限", describe_question_defect(q))
+
+    def test_option_over_length_limit_is_defect(self):
+        long_opt = "選" * (MAX_OPTION_LEN + 1)
+        q = {"type": "計算", "q": "?", "a": "A", "opts": ["A", "B", "C", long_opt]}
+        self.assertIn("長度上限", describe_question_defect(q))
+
+    def test_blank_option_is_defect(self):
+        q = {"type": "計算", "q": "?", "a": "A", "opts": ["A", "B", "C", "  "]}
+        self.assertIn("空白選項", describe_question_defect(q))
+
+    def test_limits_match_frontend(self):
+        import re
+        with open("js/logic.js", encoding="utf-8") as f:
+            src = f.read()
+        self.assertIn(f"MAX_QUESTION_LEN = {MAX_QUESTION_LEN};", src)
+        self.assertIn(f"MAX_OPTION_LEN = {MAX_OPTION_LEN};", src)
+        js_types = re.search(r"QUESTION_TYPES = \[([^\]]*)\]", src).group(1)
+        from generate_questions import ALLOWED_TYPES
+        self.assertEqual(sorted(re.findall(r"'([^']+)'", js_types)), sorted(ALLOWED_TYPES))
 
 
 class TestNormalizeQuestionText(unittest.TestCase):

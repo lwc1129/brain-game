@@ -1,4 +1,4 @@
-import { QUESTIONS_PER_DAY } from '../logic.js';
+import { playedDays, QUESTIONS_PER_DAY } from '../logic.js';
 
 export function escapeHtml(value) {
   return String(value)
@@ -14,7 +14,7 @@ export function statRowHtml(hist) {
     <div class="stat-row">
       <div class="stat-box"><div class="sb-n">${hist.total}</div><div class="sb-l">累積分數</div></div>
       <div class="stat-box"><div class="sb-n">🔥${hist.streak}</div><div class="sb-l">連續達標天</div></div>
-      <div class="stat-box"><div class="sb-n">${hist.log.length}</div><div class="sb-l">累積天數</div></div>
+      <div class="stat-box"><div class="sb-n">${playedDays(hist)}</div><div class="sb-l">累積天數</div></div>
     </div>`;
 }
 

@@ -3,6 +3,7 @@ import {
   applyDailyResult,
   computeScore,
   countCorrect,
+  effectiveStreak,
   formatDateKey,
   formatFullDate,
   getDiff,
@@ -34,13 +35,16 @@ import { renderLoading } from './render/loading.js';
 import { buildQuestionHtml, bindQuestionEvents } from './render/question.js';
 import { buildStepHtml, bindStepInput, bindStartButton } from './render/step.js';
 
-const NOW = new Date();
-const TODAY = formatDateKey(NOW);
+// 頁面可能跨午夜一直開著（長輩常不關分頁），日期必須可重新同步，見 syncToday()。
+let NOW = new Date();
+let TODAY = formatDateKey(NOW);
 
 let QB = QB_FALLBACK;
 let _data = null;
 let _hist = null;
 let _loadingMsgTimer = null;
+// 出題請求進行中時不換日，避免 await 回來後把題目寫進新一天的 _data。
+let _starting = false;
 
 async function fetchQuestionBank() {
   try {
@@ -99,6 +103,27 @@ function mainArea() {
   return document.getElementById('mainArea');
 }
 
+// 顯示用歷史：連勝改用 effectiveStreak，中斷多日後不再顯示過期的連勝數。
+function displayHist() {
+  return { ..._hist, streak: effectiveStreak(_hist, TODAY, yesterdayKey(NOW)) };
+}
+
+// 若日期已跨過午夜，切換到新的一天：重新載入當日進度並清掉前一天的 AI 請求。
+// 回傳是否發生換日。前一天的進度已存在 localStorage，不會遺失。
+function syncToday() {
+  const now = new Date();
+  const key = formatDateKey(now);
+  if (key === TODAY) return false;
+  NOW = now;
+  TODAY = key;
+  clearInflight();
+  document.getElementById('todayDate').textContent = formatFullDate(NOW);
+  _data = loadTodayData(TODAY);
+  _hist = loadHistory();
+  syncAiGeneratedFlag();
+  return true;
+}
+
 function syncAiGeneratedFlag() {
   if (!_data?.questions || _data.steps == null || _data.aiGenerated) return;
   if (isAiGeneratedForDiff(TODAY, getDiff(_data.steps).key)) _data.aiGenerated = true;
@@ -125,7 +150,7 @@ function render() {
 }
 
 function renderStep() {
-  mainArea().innerHTML = buildStepHtml(_hist);
+  mainArea().innerHTML = buildStepHtml(displayHist());
   bindStepInput(
     (diffKey) => prefetchAiQuestions(TODAY, diffKey),
     getDiff,
@@ -141,12 +166,26 @@ function renderStep() {
 }
 
 async function handleStartGame() {
+  // 步數頁停留跨過午夜後才按開始：先換日，成績才會記在正確的日期。
+  if (syncToday() && _data.completed) {
+    render();
+    return;
+  }
   const v = parseInt(document.getElementById('si').value, 10);
   if (isNaN(v) || v < 0 || v > MAX_STEPS) {
     alert('請輸入有效步數');
     return;
   }
   const diff = getDiff(v);
+  _starting = true;
+  try {
+    await startGame(v, diff);
+  } finally {
+    _starting = false;
+  }
+}
+
+async function startGame(v, diff) {
   _data.steps = v;
   _data.answers = [];
   _data.aiGenerated = false;
@@ -221,7 +260,7 @@ function renderComplete() {
     .map((_, i) => (_data.answers[i] === _data.questions[i].a ? '🟢' : '🔴'))
     .join(' ');
   const txt = buildShareText(TODAY, _data, c, dots);
-  mainArea().innerHTML = buildCompleteHtml(TODAY, _data, c, sc, diff, _hist, dots);
+  mainArea().innerHTML = buildCompleteHtml(TODAY, _data, c, sc, diff, displayHist(), dots);
   bindCompleteEvents(
     txt,
     sc,
@@ -256,6 +295,10 @@ async function init() {
   _hist = loadHistory();
   syncAiGeneratedFlag();
   render();
+  // 從背景切回分頁時檢查是否已換日；換日則回到新一天的畫面。
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && !_starting && syncToday()) render();
+  });
 }
 
 fetchQuestionBank().then(init);

@@ -5,14 +5,21 @@ import assert from 'node:assert/strict';
 
 import {
   applyDailyResult,
+  checkArithmeticAnswer,
   computeScore,
   countCorrect,
+  effectiveStreak,
+  evaluateArithmetic,
   formatDateKey,
   getDiff,
+  isValidQuestion,
   isValidQuestionBank,
   isValidQuestions,
   MAX_HISTORY_LOG,
+  MAX_OPTION_LEN,
+  MAX_QUESTION_LEN,
   pickQuestions,
+  playedDays,
   revertDailyResult,
   shareMsg,
   shuffleOptions,
@@ -369,4 +376,176 @@ test('formatDateKey / yesterdayKey', () => {
 test('內建題庫本身通過驗證', async () => {
   const { QB_FALLBACK } = await import('../js/fallback-questions.js');
   assert.ok(isValidQuestionBank(QB_FALLBACK));
+});
+
+// ── 累積天數（不受 MAX_HISTORY_LOG 截斷）────────────────────────────────
+test('playedDays：有 days 欄位時直接使用', () => {
+  assert.equal(playedDays({ days: 42, log: [] }), 42);
+});
+
+test('playedDays：舊版資料沒有 days 時以 log.length 遷移', () => {
+  assert.equal(playedDays({ log: [{}, {}, {}] }), 3);
+});
+
+test('playedDays：days 非數字或 hist 缺 log 時不爆炸', () => {
+  assert.equal(playedDays({ days: 'x', log: [{}] }), 1);
+  assert.equal(playedDays({}), 0);
+  assert.equal(playedDays(null), 0);
+});
+
+test('applyDailyResult：log 截斷後累積天數仍持續增加', () => {
+  const log = Array.from({ length: MAX_HISTORY_LOG }, (_, i) => ({
+    date: `2026-01-${String(i + 1).padStart(2, '0')}`,
+    steps: 5000,
+    correct: 3,
+    score: 35,
+  }));
+  const hist = { total: 0, streak: 0, lastDate: null, log, days: MAX_HISTORY_LOG };
+  const next = applyDailyResult(hist, {
+    today: '2026-02-01',
+    yesterday: '2026-01-31',
+    steps: 5000,
+    correct: 3,
+    score: 35,
+  });
+  assert.equal(next.log.length, MAX_HISTORY_LOG);
+  assert.equal(next.days, MAX_HISTORY_LOG + 1);
+});
+
+test('applyDailyResult：同日重玩不重複累加天數', () => {
+  const args = { today: '2026-06-10', yesterday: '2026-06-09', steps: 5000, correct: 3, score: 35 };
+  const first = applyDailyResult({ total: 0, streak: 0, lastDate: null, log: [], days: 5 }, args);
+  const second = applyDailyResult(first, { ...args, correct: 1, score: 10 });
+  assert.equal(first.days, 6);
+  assert.equal(second.days, 6);
+});
+
+test('revertDailyResult：撤銷當日時天數減一，當日無記錄時不變', () => {
+  const hist = {
+    total: 35,
+    streak: 0,
+    lastDate: null,
+    log: [{ date: '2026-06-10', steps: 1000, correct: 3, score: 35 }],
+    days: 40,
+  };
+  assert.equal(revertDailyResult(hist, { today: '2026-06-10', score: 35 }).days, 39);
+  assert.equal(revertDailyResult(hist, { today: '2026-06-11', score: 0 }).days, 40);
+});
+
+test('revertDailyResult：天數不會低於 0', () => {
+  const hist = {
+    total: 35,
+    streak: 0,
+    lastDate: null,
+    log: [{ date: '2026-06-10', steps: 1000, correct: 3, score: 35 }],
+    days: 0,
+  };
+  assert.equal(revertDailyResult(hist, { today: '2026-06-10', score: 35 }).days, 0);
+});
+
+// ── 顯示用連勝（中斷後歸零）──────────────────────────────────────────────
+test('effectiveStreak：lastDate 為今天或昨天時沿用 streak', () => {
+  assert.equal(effectiveStreak({ streak: 7, lastDate: '2026-06-10' }, '2026-06-10', '2026-06-09'), 7);
+  assert.equal(effectiveStreak({ streak: 7, lastDate: '2026-06-09' }, '2026-06-10', '2026-06-09'), 7);
+});
+
+test('effectiveStreak：lastDate 為 2 天前時顯示 0', () => {
+  assert.equal(effectiveStreak({ streak: 7, lastDate: '2026-06-08' }, '2026-06-10', '2026-06-09'), 0);
+});
+
+test('effectiveStreak：從未達標（lastDate 為 null）時顯示 0', () => {
+  assert.equal(effectiveStreak({ streak: 0, lastDate: null }, '2026-06-10', '2026-06-09'), 0);
+});
+
+test('effectiveStreak：今天步數不足但昨天達標，連勝仍保留', () => {
+  const hist = applyDailyResult(
+    { total: 0, streak: 4, lastDate: '2026-06-09', log: [] },
+    { today: '2026-06-10', yesterday: '2026-06-09', steps: 1000, correct: 3, score: 35 }
+  );
+  assert.equal(effectiveStreak(hist, '2026-06-10', '2026-06-09'), 4);
+  // 隔天再看：昨天（06-10）沒達標，連勝已斷
+  assert.equal(effectiveStreak(hist, '2026-06-11', '2026-06-10'), 0);
+});
+
+test('effectiveStreak：hist 為 null / undefined 時回 0 而非拋錯', () => {
+  assert.equal(effectiveStreak(null, '2026-06-10', '2026-06-09'), 0);
+  assert.equal(effectiveStreak(undefined, '2026-06-10', '2026-06-09'), 0);
+});
+
+// ── isValidQuestion：題型白名單與長度上限 ────────────────────────────────
+test('isValidQuestion：合法題目通過', () => {
+  assert.equal(isValidQuestion(makeQuestion()), true);
+});
+
+test('isValidQuestion：題型不在白名單時不通過', () => {
+  assert.equal(isValidQuestion({ ...makeQuestion(), type: '<script>' }), false);
+  assert.equal(isValidQuestion({ ...makeQuestion(), type: 123 }), false);
+});
+
+test('isValidQuestion：空白題目、空白答案或空白選項不通過', () => {
+  assert.equal(isValidQuestion({ ...makeQuestion(), q: '   ' }), false);
+  assert.equal(isValidQuestion({ ...makeQuestion(), a: '', opts: ['', '3', '1', '4'] }), false);
+  assert.equal(isValidQuestion({ ...makeQuestion(), opts: ['2', ' ', '1', '4'] }), false);
+});
+
+test('isValidQuestion：題目或選項超過長度上限時不通過，剛好等於上限時通過', () => {
+  assert.equal(isValidQuestion({ ...makeQuestion(), q: '字'.repeat(MAX_QUESTION_LEN) }), true);
+  assert.equal(isValidQuestion({ ...makeQuestion(), q: '字'.repeat(MAX_QUESTION_LEN + 1) }), false);
+  const long = '選'.repeat(MAX_OPTION_LEN + 1);
+  assert.equal(isValidQuestion({ ...makeQuestion(), opts: ['2', '3', '1', long] }), false);
+});
+
+// ── 純算式題驗算 ─────────────────────────────────────────────────────────
+test('evaluateArithmetic：先乘除後加減、括號、負號', () => {
+  assert.equal(evaluateArithmetic('8 × 11 − 5 × 4'), 68);
+  assert.equal(evaluateArithmetic('(2 + 3) × 4'), 20);
+  assert.equal(evaluateArithmetic('（2＋3）×4'), 20);
+  assert.equal(evaluateArithmetic('100 ÷ 4 - 5'), 20);
+  assert.equal(evaluateArithmetic('-3 + 10'), 7);
+  assert.equal(evaluateArithmetic('1.5 * 2'), 3);
+});
+
+test('evaluateArithmetic：語法錯誤回傳 null', () => {
+  assert.equal(evaluateArithmetic('3 +'), null);
+  assert.equal(evaluateArithmetic('(1 + 2'), null);
+  assert.equal(evaluateArithmetic('1 2'), null);
+  assert.equal(evaluateArithmetic('3 & 4'), null);
+  assert.equal(evaluateArithmetic(''), null);
+});
+
+test('checkArithmeticAnswer：純算式題答案正確回 true，允許單位與千分位', () => {
+  assert.equal(checkArithmeticAnswer({ q: '8 × 11 − 5 × 4 = ？', a: '68' }), true);
+  assert.equal(checkArithmeticAnswer({ q: '15 × 13 + 53 =?', a: '248' }), true);
+  assert.equal(checkArithmeticAnswer({ q: '50 × 30 = ？', a: '1,500元' }), true);
+});
+
+test('checkArithmeticAnswer：純算式題答案錯誤回 false', () => {
+  assert.equal(checkArithmeticAnswer({ q: '8 × 11 − 5 × 4 = ？', a: '412' }), false);
+  assert.equal(checkArithmeticAnswer({ q: '2 + 2 = ？', a: '四' }), false);
+  assert.equal(checkArithmeticAnswer({ q: '5 ÷ 0 = ？', a: '0' }), false);
+});
+
+test('checkArithmeticAnswer：應用題或無法解析的題目回 null（不適用）', () => {
+  assert.equal(checkArithmeticAnswer({ q: '一本書420頁，每天讀35頁，幾天可以讀完？', a: '12天' }), null);
+  assert.equal(checkArithmeticAnswer({ q: '3x = 12，x = ？', a: '4' }), null);
+  assert.equal(checkArithmeticAnswer({ q: '2, 4, 6, ？', a: '8' }), null);
+  assert.equal(checkArithmeticAnswer(null), null);
+});
+
+test('isValidQuestions：純算式題答案算錯時整組不通過', () => {
+  const wrong = { type: '計算', q: '7 × 8 = ？', a: '54', opts: ['54', '56', '58', '64'] };
+  const right = { ...wrong, a: '56' };
+  assert.equal(isValidQuestions([right, makeQuestion('b？'), makeQuestion('c？')]), true);
+  assert.equal(isValidQuestions([wrong, makeQuestion('b？'), makeQuestion('c？')]), false);
+});
+
+test('checkArithmeticAnswer：題庫與內建題庫的純算式題全部算對', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const { QB_FALLBACK } = await import('../js/fallback-questions.js');
+  const bank = JSON.parse(await readFile(new URL('../questions.json', import.meta.url), 'utf8'));
+  for (const b of [bank, QB_FALLBACK]) {
+    for (const qs of Object.values(b)) {
+      for (const q of qs) assert.notEqual(checkArithmeticAnswer(q), false, q.q);
+    }
+  }
 });
