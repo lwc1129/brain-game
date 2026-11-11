@@ -61,11 +61,16 @@ jobs:
             grep -q "AI_PROXY_URL: '${PROXY_ESC}'" js/config.js
           fi
 
+      # 只公開網站執行期需要的檔案（index.html、css、js、assets、questions.json）；
+      # 測試、eval、Python 腳本、api/ 不上傳。清單見 scripts/build_site.sh。
+      - name: Build site
+        run: ./scripts/build_site.sh _site
+
       - uses: actions/configure-pages@v5
 
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: '.'
+          path: '_site'
 
       - uses: actions/deploy-pages@v4
         id: deployment
