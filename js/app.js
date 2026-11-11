@@ -33,7 +33,7 @@ import { logError } from './logger.js';
 import { buildCompleteHtml, buildShareText, bindCompleteEvents } from './render/complete.js';
 import { renderLoading } from './render/loading.js';
 import { buildQuestionHtml, bindQuestionEvents } from './render/question.js';
-import { buildStepHtml, bindStepInput, bindStartButton } from './render/step.js';
+import { buildStepHtml, bindStepInput, bindStartButton, showStepError } from './render/step.js';
 
 // 頁面可能跨午夜一直開著（長輩常不關分頁），日期必須可重新同步，見 syncToday()。
 let NOW = new Date();
@@ -173,7 +173,7 @@ async function handleStartGame() {
   }
   const v = parseInt(document.getElementById('si').value, 10);
   if (isNaN(v) || v < 0 || v > MAX_STEPS) {
-    alert('請輸入有效步數');
+    showStepError();
     return;
   }
   const diff = getDiff(v);
@@ -273,7 +273,7 @@ function renderComplete() {
       renderStep();
     },
     () => {
-      if (!confirm('重新挑戰？今日得分將扣除。')) return;
+      // 確認步驟由 bindCompleteEvents 的頁內確認面板處理（取代原生 confirm）。
       trackEvent('retry_game', { previous_score: sc });
       _hist = revertDailyResult(_hist, { today: TODAY, score: sc });
       bumpAiRetryVersion(TODAY);
