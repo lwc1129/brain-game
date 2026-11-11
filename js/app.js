@@ -316,6 +316,14 @@ async function init() {
   });
 }
 
+// 註冊 service worker：可加到主畫面、離線時用快取遊玩（見 sw.js）。
+// 註冊失敗不影響遊戲，只記錄 log。
+function registerServiceWorker() {
+  if (!('serviceWorker' in navigator)) return;
+  navigator.serviceWorker.register('./sw.js').catch((e) => logError('registerServiceWorker', e));
+}
+
 // 先畫出畫面，題庫在背景下載（見 waitForBank）。
 _bankReady = fetchQuestionBank();
 init();
+registerServiceWorker();

@@ -4,6 +4,6 @@
   "type": "module",
   "scripts": {
     "test": "node --test --test-concurrency=1 tests/*.test.mjs tests/integration/*.test.mjs",
-    "test:e2e": "node --test --test-concurrency=1 tests/e2e/*.e2e.mjs"
+    "test:e2e": "node --test --test-concurrency=1 --test-timeout=60000 tests/e2e/*.e2e.mjs"
   }
 }
