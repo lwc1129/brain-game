@@ -12,6 +12,7 @@ import handler, {
   GEMINI_TIMEOUT_MS,
   getClientKey,
   isValidQuestions,
+  parseQuestionsText,
   pickPromptTypes,
   pruneStore,
   QUESTION_CACHE_SETS,
@@ -800,4 +801,35 @@ test('handler：快取命中仍受限流保護（限流在快取之前）', asyn
       else delete process.env[env];
     }
   }
+});
+
+// ── parseQuestionsText：模型輸出解析 ──────────────────────────────────────
+test('parseQuestionsText：純 JSON 陣列直接解析', () => {
+  assert.deepEqual(parseQuestionsText('[{"q":"a"}]'), [{ q: 'a' }]);
+});
+
+test('parseQuestionsText：markdown 包裝時擷取 [...] 區段', () => {
+  assert.deepEqual(parseQuestionsText('```json\n[1,2,3]\n```'), [1, 2, 3]);
+});
+
+test('parseQuestionsText：無法解析時回傳 undefined', () => {
+  assert.equal(parseQuestionsText('not json at all'), undefined);
+  assert.equal(parseQuestionsText('prefix [broken, json'), undefined);
+  assert.equal(parseQuestionsText('[1, 2,]'), undefined);
+  assert.equal(parseQuestionsText(''), undefined);
+});
+
+test('parseQuestionsText：合法 JSON 但不是陣列時照樣回傳，交給 isValidQuestions 判斷', () => {
+  assert.equal(parseQuestionsText('null'), null);
+  assert.deepEqual(parseQuestionsText('{"a":1}'), { a: 1 });
+});
+
+test('handler：模型回傳 JSON null 時記錄「驗證失敗」而非「解析失敗」（重構前後行為一致）', async () => {
+  const { res, errors } = await runWithFetch(async () => ({
+    ok: true,
+    json: async () => ({ candidates: [{ content: { parts: [{ text: 'null' }] } }] }),
+  }));
+  assert.equal(res.statusCode, 502);
+  assert.ok(errors.some((m) => m.includes('isValidQuestions 驗證失敗')));
+  assert.ok(!errors.some((m) => m.includes('JSON 解析失敗')));
 });
