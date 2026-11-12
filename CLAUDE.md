@@ -28,7 +28,7 @@
 
 2. **新 prompt 必須有封閉指令**：每個 `buildPrompt`-style 函數的最後一行必須包含封閉指令，如現有的 `只回傳JSON陣列，不要其他文字或markdown`，防止模型輸出任意文字。
 
-3. **AI 回應必須通過 `isValid*` 驗證後才使用**：`isValidQuestions()` 只定義在 `js/logic.js`，`api/questions.js` 直接 import 同一份，前後端共用、不會漂移。它檢查結構、題型白名單（`QUESTION_TYPES`）、長度上限（`MAX_QUESTION_LEN` / `MAX_OPTION_LEN`），並驗算純算式題的答案（`checkArithmeticAnswer`）。新增任何 Gemini call，必須先寫對應的 `isValid*` 函數和測試，才能在程式中消費 AI 回應。`generate_questions.py` 的 `describe_question_defect` 必須與 `isValidQuestion` 保持同一套規則（有測試鎖住）。
+3. **AI 回應必須通過 `isValid*` 驗證後才使用**：`isValidQuestions()` 只定義在 `js/logic.js`，`api/questions.js` 直接 import 同一份，前後端共用、不會漂移。它檢查結構、題型白名單（`QUESTION_TYPES`）、長度上限（`MAX_QUESTION_LEN` / `MAX_OPTION_LEN`），並驗算純算式題的答案（`checkArithmeticAnswer`）。新增任何 Gemini call，必須先寫對應的 `isValid*` 函數和測試，才能在程式中消費 AI 回應。`generate_questions.py` 的 `describe_question_defect` 必須與 `isValidQuestion` 保持同一套規則，並同樣驗算純算式題（有測試鎖住）。
 
 4. **前端 DOM 插入必須過 `escapeHtml()`**：所有 AI 來源欄位（`q.q`, `q.a`, `q.opts[*]`）插入 HTML 前必須通過 `escapeHtml()`（位於 `js/render/helpers.js`）。禁止對 AI 來源字串直接使用 `innerHTML`。e2e 的 `xss` 測試會以惡意題庫實際驗證這一點。
 
@@ -85,7 +85,7 @@ function logError(context, error) {
 }
 ```
 
-已套用：`js/ai.js`（proxy 呼叫失敗）、`js/app.js`（題庫載入失敗）、`js/storage.js`（localStorage 讀寫失敗）、`js/render/complete.js`（分享 / 複製失敗；使用者自行取消分享不記錄）。
+已套用：`js/ai.js`（proxy 呼叫失敗）、`js/app.js`（題庫載入失敗）、`js/storage.js`（localStorage 讀寫失敗）、`js/render/complete.js`（分享 / 複製失敗；使用者自行取消分享不記錄）、`js/analytics.js`（GA 事件送出失敗）。
 
 **Self-check（合併前回答）：**
 - 新增的錯誤路徑有 `level`, `ts`, `msg`, `ctx` 四個欄位嗎？
@@ -207,11 +207,9 @@ FAIL [streak-10]: 連續天數計算錯誤 — 預期 10，實際 0
 
 ### 已知待處理項目（優先序）
 
-1. `js/analytics.js` 的 `trackEvent` 仍有 `catch {}`：GA 失敗不應影響遊戲，但應補 `logError`。
-2. `api/questions.js` 的 `callGemini` 約 90 行，可拆出「呼叫」與「解析 + 驗證」兩段。
-3. `generate_questions.py` 尚未對純算式題做答案驗算（前端 `checkArithmeticAnswer` 只用於 AI 即時出題）。
+1. `api/questions.js` 的 `callGemini` 約 90 行，可拆出「呼叫」與「解析 + 驗證」兩段。
 
-已完成（保留紀錄避免重複評估）：render 層已拆到 `js/render/`；silent catch 已補 log；`isValidQuestions` 已決定只放 `js/logic.js` 由 proxy import。
+已完成（保留紀錄避免重複評估）：render 層已拆到 `js/render/`；silent catch 已補 log（含 `js/analytics.js`）；`isValidQuestions` 已決定只放 `js/logic.js` 由 proxy import；`generate_questions.py` 已對純算式題驗算（`check_arithmetic_answer`，與前端 `checkArithmeticAnswer` 有逐題比對的一致性測試）。
 
 **Self-check（重構後回答）：**
 - `npm test` 通過了嗎？

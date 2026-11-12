@@ -1,4 +1,5 @@
 import { CONFIG } from './config.js';
+import { logError } from './logger.js';
 
 export function initAnalytics() {
   if (!CONFIG.GA_MEASUREMENT_ID) return;
@@ -16,7 +17,10 @@ export function initAnalytics() {
 
 export function trackEvent(name, params) {
   if (typeof window.gtag !== 'function') return;
+  // GA 失敗不得影響遊戲流程，但要留下結構化 log 方便排查。
   try {
     window.gtag('event', name, params);
-  } catch {}
+  } catch (e) {
+    logError({ op: 'trackEvent', event: name }, e);
+  }
 }

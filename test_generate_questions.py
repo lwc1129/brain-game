@@ -27,6 +27,8 @@ from generate_questions import (
     MODEL_NAME,
     TYPE_CAP,
     build_prompt,
+    check_arithmetic_answer,
+    evaluate_arithmetic,
     call_gemini,
     MAX_OPTION_LEN,
     MAX_QUESTION_LEN,
@@ -41,7 +43,8 @@ from generate_questions import (
 )
 
 
-def _make_question(answer="A", text="1 + 1 = ?"):
+# 預設題文刻意不是純算式：「1 + 1 = ?」配答案「A」會被算式驗算判為錯題。
+def _make_question(answer="A", text="下列何者正確？"):
     return {"type": "計算", "q": text, "a": answer, "opts": ["A", "B", "C", "D"]}
 
 
@@ -209,6 +212,79 @@ class TestDescribeQuestionDefect(unittest.TestCase):
         js_types = re.search(r"QUESTION_TYPES = \[([^\]]*)\]", src).group(1)
         from generate_questions import ALLOWED_TYPES
         self.assertEqual(sorted(re.findall(r"'([^']+)'", js_types)), sorted(ALLOWED_TYPES))
+
+
+class TestArithmeticCheck(unittest.TestCase):
+    """純算式題驗算，規則需與 js/logic.js 的 checkArithmeticAnswer 一致。"""
+
+    def test_evaluate_precedence_parentheses_and_aliases(self):
+        self.assertEqual(evaluate_arithmetic("8 × 11 − 5 × 4"), 68)
+        self.assertEqual(evaluate_arithmetic("（2＋3）×4"), 20)
+        self.assertEqual(evaluate_arithmetic("100 ÷ 4 - 5"), 20)
+        self.assertEqual(evaluate_arithmetic("-3 + 10"), 7)
+
+    def test_evaluate_syntax_errors_return_none(self):
+        for expr in ["3 +", "(1 + 2", "1 2", "3 & 4", "", "１+１"]:
+            self.assertIsNone(evaluate_arithmetic(expr), expr)
+
+    def test_correct_answer_with_unit_and_comma(self):
+        self.assertIs(check_arithmetic_answer({"q": "8 × 11 − 5 × 4 = ？", "a": "68"}), True)
+        self.assertIs(check_arithmetic_answer({"q": "50 × 30 = ？", "a": "1,500元"}), True)
+
+    def test_wrong_answer_and_division_by_zero(self):
+        self.assertIs(check_arithmetic_answer({"q": "7 × 8 = ？", "a": "54"}), False)
+        self.assertIs(check_arithmetic_answer({"q": "2 + 2 = ？", "a": "四"}), False)
+        self.assertIs(check_arithmetic_answer({"q": "5 ÷ 0 = ？", "a": "0"}), False)
+
+    def test_word_problems_are_not_applicable(self):
+        self.assertIsNone(check_arithmetic_answer({"q": "一本書420頁，每天讀35頁，幾天可以讀完？", "a": "12天"}))
+        self.assertIsNone(check_arithmetic_answer({"q": "3x = 12，x = ？", "a": "4"}))
+        self.assertIsNone(check_arithmetic_answer("not a dict"))
+
+    def test_wrong_arithmetic_is_a_question_defect(self):
+        q = {"type": "計算", "q": "7 × 8 = ？", "a": "54", "opts": ["54", "56", "58", "64"]}
+        self.assertIn("純算式題答案錯誤", describe_question_defect(q))
+        self.assertIsNone(describe_question_defect({**q, "a": "56"}))
+
+    def test_current_bank_has_no_wrong_arithmetic(self):
+        with open("questions.json", encoding="utf-8") as f:
+            bank = json.load(f)
+        for questions in bank.values():
+            for q in questions:
+                self.assertIsNot(check_arithmetic_answer(q), False, q["q"])
+
+    def test_matches_frontend_implementation(self):
+        """與前端 checkArithmeticAnswer 逐題比對結果；環境沒有 node 時略過。"""
+        import shutil
+        import subprocess
+        if not shutil.which("node"):
+            self.skipTest("node 不存在")
+        cases = [
+            {"q": "8 × 11 − 5 × 4 = ？", "a": "68"},
+            {"q": "7 × 8 = ？", "a": "54"},
+            {"q": "（2＋3）×4 = ?", "a": "20"},
+            {"q": "5 ÷ 0 = ？", "a": "0"},
+            {"q": "１+１ = ？", "a": "2"},
+            {"q": "1 2 = ？", "a": "12"},
+            {"q": "一本書420頁，每天讀35頁，幾天可以讀完？", "a": "12天"},
+        ]
+        with open("questions.json", encoding="utf-8") as f:
+            for qs in json.load(f).values():
+                cases.extend({"q": q["q"], "a": q["a"]} for q in qs)
+        script = (
+            "import { checkArithmeticAnswer } from './js/logic.js';"
+            "import { readFileSync } from 'node:fs';"
+            "const cases = JSON.parse(readFileSync(0, 'utf8'));"
+            "process.stdout.write(JSON.stringify(cases.map(checkArithmeticAnswer)));"
+        )
+        out = subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            input=json.dumps(cases), capture_output=True, text=True, check=True,
+        ).stdout
+        js_results = json.loads(out)
+        py_results = [check_arithmetic_answer(c) for c in cases]
+        mismatches = [(c["q"], js, py) for c, js, py in zip(cases, js_results, py_results) if js != py]
+        self.assertEqual(mismatches, [])
 
 
 class TestNormalizeQuestionText(unittest.TestCase):
