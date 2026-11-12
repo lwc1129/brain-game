@@ -73,6 +73,16 @@ describe('update_questions.yml 呼叫部署', () => {
     assert.match(block, /needs\.validate\.result == 'success'/);
     assert.match(block, /skip_tests: true/);
   });
+
+  // 排程暫停期間的防呆：避免在 Issue #46 達標前被無意間恢復。
+  // 依 workflow 檔內註明的條件恢復排程時，連同這個測試一起移除。
+  test('update_questions：排程暫停中，只能手動觸發', () => {
+    const onBlock = yml.slice(yml.indexOf('\non:\n'), yml.indexOf('\npermissions:'));
+    assert.match(onBlock, /^  workflow_dispatch:/m);
+    assert.doesNotMatch(onBlock, /^  schedule:/m);
+    assert.doesNotMatch(onBlock, /^\s+- cron:/m);
+    assert.match(onBlock, /#46/);
+  });
 });
 
 describe('smoke-prod.yml', () => {

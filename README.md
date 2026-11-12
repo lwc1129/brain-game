@@ -71,8 +71,10 @@ questions.json              動態題庫（GitHub Actions 每週自動擴充）
 - `questions.json` 共 1200 題（hard / medium / easy / super_easy 各 300 題），
   由 `seed_questions.py` 一次性產生（參數化模板＋人工編寫內容，固定種子可重現）。
 - 內建 fallback 題庫 120 題（各難度 30 題），questions.json 載入失敗時離線可玩。
-- GitHub Actions 每週呼叫 Gemini 自動「擴充」：新題與舊題合併、
+- 題庫可由 GitHub Actions 呼叫 Gemini「擴充」：新題與舊題合併、
   以題目文字去重、每難度上限 300 題（超過時淘汰最舊）。
+  **每週排程目前暫停**，只能手動執行；原因與恢復條件寫在
+  `.github/workflows/update_questions.yml` 開頭（見 Issue #46）。
 - 前端記錄每個難度最近 240 題（約 80 天份量），抽題時優先排除，降低重複感。
 - 選項順序在出題時隨機打亂。
 
@@ -110,5 +112,5 @@ CI（`.github/workflows/test.yml`）會在 PR 時跑上述三組測試，
 - 部署成功後，`.github/workflows/smoke-prod.yml` 會實際打正式站（Pages 首頁與 AI proxy 出題），
   失敗時通知 Slack。同一個檢查每天台灣時間 09:05 也會跑一次，也可以手動執行。
   注意：Vercel 的 API 部署不受這個測試閘門控制，合併後仍會自動上線。
-- 每週日 UTC 19:00（台灣週一凌晨 03:00）由 `.github/workflows/update_questions.yml`
-  自動擴充題庫。
+- `.github/workflows/update_questions.yml` 可手動執行來擴充題庫
+  （原本的每週排程暫停中，見上方「題庫」一節）。

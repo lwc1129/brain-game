@@ -1,9 +1,15 @@
 name: 每週自動更新題庫
 
 on:
-  schedule:
-    # 台灣週一 03:00 = UTC 週日 19:00
-    - cron: '0 19 * * 0'
+  # 排程暫停中（2026-11-13 起），只保留手動觸發。
+  # 原因：合併規則是先進先出，每週新增的 AI 題會把人工整理的種題擠掉；
+  # 而 AI 題的難度校準（Issue #46）還沒有達標紀錄。
+  # 恢復條件：(1) 手動跑 difficulty-eval.yml，結果寫進 #46 並達標；
+  #          (2) 淘汰規則改為優先淘汰 AI 產生的題目。
+  # 恢復方式：取消下面三行的註解，並移除 tests/deploy-gate.test.mjs 中鎖住暫停狀態的測試。
+  # schedule:
+  #   # 台灣週一 03:00 = UTC 週日 19:00
+  #   - cron: '0 19 * * 0'
   workflow_dispatch:
 
 # contents:write 僅用於 generate 成功且 validation 通過後的 commit。
