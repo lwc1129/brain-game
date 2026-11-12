@@ -13,6 +13,11 @@ on:
         type: string
         required: false
         default: ''
+      skip_tests:
+        description: 呼叫方已自行跑過完整測試時設為 true（update_questions.yml 的 validate job）
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -27,7 +32,16 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
+  # 部署閘門：測試沒過就不部署。push / 手動觸發時一律先跑；
+  # 只有呼叫方明確傳 skip_tests 才略過（非 workflow_call 時 inputs.skip_tests 為空，視為 false）。
+  test:
+    if: ${{ !inputs.skip_tests }}
+    uses: ./.github/workflows/test.yml
+
   deploy:
+    needs: [test]
+    # test 被略過（skipped）時仍要部署，所以不能用預設的 success()。
+    if: ${{ !cancelled() && (needs.test.result == 'success' || needs.test.result == 'skipped') }}
     runs-on: ubuntu-latest
     environment:
       name: github-pages
@@ -75,10 +89,21 @@ jobs:
       - uses: actions/deploy-pages@v4
         id: deployment
 
-  # Failure-only Slack 通知。成功路徑不執行。
-  # notification 本身失敗不會掩蓋 deploy job 的原始錯誤（見 notify-slack-failure.yml）。
-  notify-failure:
+  # 上線後煙霧測試：實際打正式站的 Pages 與 AI proxy（見 smoke-prod.yml）。
+  # 上游 test 可能是 skipped，需明確寫條件，否則本 job 會跟著被略過。
+  smoke:
     needs: [deploy]
+    if: ${{ !cancelled() && needs.deploy.result == 'success' }}
+    uses: ./.github/workflows/smoke-prod.yml
+    secrets: inherit
+    with:
+      # 失敗通知由下方 notify-failure 統一送出，避免同一次失敗通知兩次。
+      skip_notify: true
+
+  # Failure-only Slack 通知。成功路徑不執行。
+  # notification 本身失敗不會掩蓋原始錯誤（見 notify-slack-failure.yml）。
+  notify-failure:
+    needs: [test, deploy, smoke]
     if: failure()
     uses: ./.github/workflows/notify-slack-failure.yml
     secrets: inherit

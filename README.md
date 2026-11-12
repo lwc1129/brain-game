@@ -100,12 +100,15 @@ npm run test:e2e                                 # 瀏覽器 e2e（需先 npm in
 python3 -m unittest test_generate_questions test_difficulty_eval -v   # 題庫腳本
 ```
 
-CI（`.github/workflows/test.yml`）會在 push / PR 時跑上述三組測試，
-並驗證 `questions.json` 符合前端題庫 schema。
+CI（`.github/workflows/test.yml`）會在 PR 時跑上述三組測試，
+並驗證 `questions.json` 符合前端題庫 schema；push 到 `main` 時由部署流程先呼叫同一組測試。
 
 ## 部署
 
-- push 到 `main` 後由 `.github/workflows/deploy.yml` 部署至 GitHub Pages；
+- push 到 `main` 後由 `.github/workflows/deploy.yml` 先跑測試，**通過才**部署至 GitHub Pages；
   只上傳 `scripts/build_site.sh` 組出的 `_site/`，測試、eval、Python 腳本與 `api/` 不公開。
+- 部署成功後，`.github/workflows/smoke-prod.yml` 會實際打正式站（Pages 首頁與 AI proxy 出題），
+  失敗時通知 Slack。同一個檢查每天台灣時間 09:05 也會跑一次，也可以手動執行。
+  注意：Vercel 的 API 部署不受這個測試閘門控制，合併後仍會自動上線。
 - 每週日 UTC 19:00（台灣週一凌晨 03:00）由 `.github/workflows/update_questions.yml`
   自動擴充題庫。

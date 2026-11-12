@@ -1,8 +1,8 @@
 name: Tests
 
 on:
-  push:
-    branches: [main]
+  # push 到 main 時不在這裡觸發：改由 deploy.yml 以 workflow_call 呼叫，
+  # 測試通過才部署（同一批測試不跑兩次）。
   pull_request:
   workflow_dispatch:
   # 供 update_questions.yml 在題庫生成後以原生 orchestration 呼叫，
