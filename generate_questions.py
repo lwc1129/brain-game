@@ -22,6 +22,7 @@ QB schema（與 index.html 內現有 QB 物件完全一致）：
 
 import json
 import os
+import re
 import sys
 import unicodedata
 from datetime import datetime, timezone
@@ -185,6 +186,108 @@ def parse_response_text(text):
         raise ValueError(f"無法解析 Gemini 回傳為合法 JSON：{exc}") from exc
 
 
+# ── 純算式題驗算（與前端 js/logic.js 的 checkArithmeticAnswer 規則一致）────────
+# 題目只由數字與運算符號組成、並以「= ？」結尾時，自行解析計算（不使用 eval）並比對答案。
+# 注意用 [0-9] 而非 \d：Python 的 \d 會匹配全形等 Unicode 數字，JS 不會。
+_ARITH_QUESTION = re.compile(r"^([0-9\s.+\-−＋－×xX*÷/()（）]+)[=＝]\s*[？?]\s*$")
+_ARITH_NUMBER = re.compile(r"[0-9]+(?:\.[0-9]+)?")
+_ARITH_ANSWER = re.compile(r"^-?[0-9]+(?:\.[0-9]+)?")
+_OP_ALIASES = {"−": "-", "＋": "+", "－": "-", "×": "*", "x": "*", "X": "*", "÷": "/", "（": "(", "）": ")"}
+
+
+def _tokenize_arithmetic(expr):
+    tokens = []
+    i = 0
+    while i < len(expr):
+        if expr[i].isspace():
+            i += 1
+            continue
+        m = _ARITH_NUMBER.match(expr, i)
+        if m:
+            tokens.append(float(m.group()))
+            i = m.end()
+            continue
+        op = _OP_ALIASES.get(expr[i], expr[i])
+        if op not in "+-*/()":
+            return None
+        tokens.append(op)
+        i += 1
+    return tokens
+
+
+def evaluate_arithmetic(expr):
+    """解析並計算算式。語法錯誤回傳 None；除以 0 回傳 float('inf')。"""
+    tokens = _tokenize_arithmetic(expr)
+    if not tokens:
+        return None
+    pos = 0
+
+    def peek():
+        return tokens[pos] if pos < len(tokens) else None
+
+    def take():
+        nonlocal pos
+        if pos >= len(tokens):
+            raise ValueError("unexpected end")
+        t = tokens[pos]
+        pos += 1
+        return t
+
+    def factor():
+        t = take()
+        if isinstance(t, float):
+            return t
+        if t == "-":
+            return -factor()
+        if t == "(":
+            v = total()
+            if take() != ")":
+                raise ValueError("unbalanced")
+            return v
+        raise ValueError("unexpected token")
+
+    def product():
+        v = factor()
+        while peek() in ("*", "/"):
+            if take() == "*":
+                v *= factor()
+            else:
+                d = factor()
+                v = float("inf") if d == 0 else v / d
+        return v
+
+    def total():
+        v = product()
+        while peek() in ("+", "-"):
+            v = v + product() if take() == "+" else v - product()
+        return v
+
+    try:
+        v = total()
+    except ValueError:
+        return None
+    return v if pos == len(tokens) else None
+
+
+def check_arithmetic_answer(q):
+    """純算式題回傳答案是否正確（True / False）；非純算式題或無法解析回傳 None（不適用）。
+
+    答案取開頭數字比對，允許附單位（如「68元」）與千分位逗號。
+    """
+    m = _ARITH_QUESTION.match(q.get("q", "") if isinstance(q, dict) else "")
+    if not m:
+        return None
+    expected = evaluate_arithmetic(m.group(1))
+    if expected is None:
+        return None
+    if expected in (float("inf"), float("-inf")):
+        return False
+    ans = _ARITH_ANSWER.match(str(q.get("a", "")).replace(",", "").strip())
+    if not ans:
+        return False
+    return abs(float(ans.group()) - expected) < 1e-9
+
+
 def describe_question_defect(q):
     """回傳單題缺陷原因字串；合法則回傳 None。
 
@@ -223,6 +326,8 @@ def describe_question_defect(q):
         return "opts 有重複選項，4 個選項必須互不相同"
     if q["a"] not in opts:
         return "正確答案 a 不在 opts 選項中"
+    if check_arithmetic_answer(q) is False:
+        return f"純算式題答案錯誤：{q['q']} 的答案不是 {q['a']}"
     return None
 
 
