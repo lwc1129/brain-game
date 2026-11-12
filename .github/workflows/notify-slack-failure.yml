@@ -93,7 +93,7 @@ jobs:
             exit 0
           fi
 
-          # 沿用 ai-pr-review.yml 的 Incoming Webhook + curl -sf 模式；
+          # Slack Incoming Webhook + curl -sf；
           # 以 jq 組 JSON，避免特殊字元弄壞 payload。
           PAYLOAD="$(jq -n \
             --arg workflow "$WORKFLOW_NAME" \
