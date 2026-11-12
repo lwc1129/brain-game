@@ -103,9 +103,9 @@ describe('deploy.yml failure notification', () => {
     assert.match(yml, /if:\s*failure\(\)/);
   });
 
-  test('deploy：notify 只依賴 deploy job，成功時不觸發', () => {
+  test('deploy：notify 依賴 test／deploy／smoke，成功時不觸發', () => {
     const notifyBlock = yml.slice(yml.indexOf('notify-failure:'));
-    assert.match(notifyBlock, /needs:\s*\[deploy\]/);
+    assert.match(notifyBlock, /needs:\s*\[test,\s*deploy,\s*smoke\]/);
     assert.match(notifyBlock, /if:\s*failure\(\)/);
     assert.doesNotMatch(notifyBlock, /if:\s*always\(\)/);
   });

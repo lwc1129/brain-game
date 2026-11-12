@@ -34,11 +34,12 @@
 ## PR
 
 - 重構與功能／修正分開 PR。描述這次變更的文件修改跟著同一個 PR 走，不另開。
-- 合併後才算完成：CI 三個 job 綠、Pages 部署成功、對正式站 `/api/questions` 實際出題成功。缺任何一項就回報「未驗證」。
+- 合併後才算完成：`Deploy to GitHub Pages` 這次執行裡的 `test`、`deploy`、`smoke` 三段都綠（`smoke` 會實際對正式站 `/api/questions` 出題）。缺任何一段就回報「未驗證」。
 - 待辦放 GitHub Issue，PR 本文用 `Closes #N`。本檔不列待辦、不記狀態。
 
 ## 目前沒有的東西（不要當成已存在）
 
-- 沒有異常偵測與自動修復。正式環境的 502 只能從 Vercel 執行紀錄得知（Hobby 方案保留約 1 小時）。
+- 沒有異常偵測與自動修復。`smoke-prod.yml` 只在部署後與每天一次打正式站；其餘時間的 502 只能從 Vercel 執行紀錄得知（Hobby 方案保留約 1 小時）。
+- 測試閘門只擋 GitHub Pages。Vercel 的 API 在合併後一律自動部署，不看測試結果。
 - 沒有 AI 自動審查 PR 的 workflow。
 - CI 不測真實 Gemini、真實手機、PWA 安裝。

@@ -110,6 +110,8 @@ jobs:
     uses: ./.github/workflows/deploy.yml
     with:
       ref: ${{ needs.commit.outputs.new_sha }}
+      # 上面的 validate job 已對同一份 questions.json 跑過完整測試。
+      skip_tests: true
     secrets: inherit
 
   # 客觀驗證 production questions.json 與剛部署的版本一致。

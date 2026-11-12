@@ -1,0 +1,93 @@
+# 正式環境煙霧測試：CI 用 mock，測不到「金鑰沒設」「模型 ID 下線」「Pages 與 Vercel 串不起來」，
+# 這裡實際打正式站確認。
+#
+# 觸發：
+# - deploy.yml 部署成功後呼叫（workflow_call）
+# - 每天一次排程，抓兩次部署之間 Gemini / Vercel 端的變動
+# - 手動（workflow_dispatch）
+#
+# 成本：每次最多 SMOKE_MAX_ATTEMPTS 次 proxy 請求；成功即停，熱實例上多半命中題目快取。
+# 限制：Vercel 部署可能比 Pages 慢，部署後那一次有機會打到舊版 API，由每日排程補上。
+# 不檢查題目內容品質，只確認回 200 且題數正確。
+
+name: Production smoke
+
+on:
+  workflow_call:
+    inputs:
+      skip_notify:
+        description: 呼叫方自行處理失敗通知時設為 true，避免重複通知
+        type: boolean
+        required: false
+        default: false
+  workflow_dispatch:
+  schedule:
+    # 台北 09:05 = UTC 01:05（避開 09:00 前）
+    - cron: '5 1 * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      PAGES_URL: https://lwc1129.github.io/brain-game/
+      # 必須在 proxy 的 ALLOWED_ORIGINS 內（預設值即為此來源）。
+      SMOKE_ORIGIN: https://lwc1129.github.io
+      SMOKE_MAX_ATTEMPTS: '3'
+      SMOKE_SLEEP_SECONDS: '30'
+      SMOKE_CURL_MAX_TIME_SECONDS: '20'
+      EXPECTED_QUESTION_COUNT: '3'
+    steps:
+      - name: Pages 首頁、service worker、題庫可下載
+        run: |
+          set -euo pipefail
+          for path in "" sw.js questions.json; do
+            curl -fsS -m "${SMOKE_CURL_MAX_TIME_SECONDS}" -o /dev/null "${PAGES_URL}${path}"
+            echo "OK ${PAGES_URL}${path}"
+          done
+
+      - name: AI proxy 真實出題
+        env:
+          AI_PROXY_URL: ${{ vars.AI_PROXY_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "${AI_PROXY_URL}" ]; then
+            echo "::warning::repository variable AI_PROXY_URL 未設定，正式站未啟用 AI 出題，略過 proxy 檢查"
+            exit 0
+          fi
+          i=1
+          while [ "$i" -le "${SMOKE_MAX_ATTEMPTS}" ]; do
+            code="$(curl -s -m "${SMOKE_CURL_MAX_TIME_SECONDS}" -o body.json -w '%{http_code}' \
+              -X POST "${AI_PROXY_URL}" \
+              -H "Origin: ${SMOKE_ORIGIN}" \
+              -H 'Content-Type: application/json' \
+              -d '{"difficulty":"easy"}')" || code=000
+            if [ "$code" = "200" ] \
+              && jq -e --argjson n "${EXPECTED_QUESTION_COUNT}" '.questions | length == $n' body.json >/dev/null 2>&1; then
+              echo "第 ${i} 次：HTTP 200，${EXPECTED_QUESTION_COUNT} 題"
+              exit 0
+            fi
+            # 只印狀態碼與錯誤欄位，不印整個回應。
+            echo "第 ${i} 次：HTTP ${code} $(jq -r '.error // empty' body.json 2>/dev/null || true)"
+            i=$((i + 1))
+            sleep "${SMOKE_SLEEP_SECONDS}"
+          done
+          echo "::error::AI proxy 連續 ${SMOKE_MAX_ATTEMPTS} 次未能出題（503＝金鑰未設定；502＝Gemini 失敗或模型下線；403＝origin 不在允許清單）"
+          exit 1
+
+  # Failure-only Slack 通知。被 deploy.yml 呼叫時由呼叫方統一通知（skip_notify）。
+  # 排程／手動觸發時 inputs.skip_notify 為空，視為 false。
+  notify-failure:
+    needs: [smoke]
+    if: ${{ failure() && !inputs.skip_notify }}
+    uses: ./.github/workflows/notify-slack-failure.yml
+    secrets: inherit
+    with:
+      workflow_name: Production smoke
+      result: failure
+      branch: ${{ github.ref_name }}
+      commit_sha: ${{ github.sha }}
+      run_url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
