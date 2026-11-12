@@ -251,7 +251,7 @@ Labels: ops, auto
 | `RATE_LIMIT_WINDOW_MS` | 環境變數 | 60,000 ms | 限流視窗長度 |
 | `FETCH_TIMEOUT_MS` | `js/ai.js` | 8,000 ms | 不可移除；防止前端 hang 死 |
 | `GEMINI_TIMEOUT_MS` | `api/questions.js` | 7,000 ms | 必須小於 `FETCH_TIMEOUT_MS`，讓 proxy 先放棄並留下 log（有測試鎖住） |
-| `GEMINI_MAX_OUTPUT_TOKENS` | `api/questions.js` | 1,024 | 搭配 `thinkingBudget: 0`；調低可能截斷 JSON |
+| `GEMINI_MAX_OUTPUT_TOKENS` | `api/questions.js` | 1,024 | 搭配 `thinkingConfig.thinkingLevel: 'MINIMAL'`；調低可能截斷 JSON |
 | `RECENT_LIMIT` | `js/storage.js` | 240 題 | 每難度「近期出過」記錄；必須小於題庫每難度上限 300 |
 | `QUESTION_CACHE_SETS` | `api/questions.js` | 5 組 | 同日同難度累積幾組 Gemini 題目後改從快取隨機回傳；調高 = 題目更多樣但 Gemini 用量增加。快取在 origin / enum / rate limit 之後（有測試鎖住順序），單實例記憶體，冷啟動重新累積 |
 | `BANK_WAIT_MS` | `js/app.js` | 3,000 ms | 按開始時最多等背景題庫多久，逾時改用內建題庫 |

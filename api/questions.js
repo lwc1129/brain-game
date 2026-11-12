@@ -17,9 +17,11 @@ export { isValidQuestions, QUESTION_TYPES };
 
 const DIFFICULTIES = new Set(['hard', 'medium', 'easy', 'super_easy']);
 const QUESTIONS_PER_DAY = 3;
-const MODEL_NAME = 'gemini-2.5-flash';
-// 輸出 token 上限。gemini-2.5-flash 預設會先「思考」，思考 token 也計入此上限，
-// 512 時常把 3 題中文 JSON 截斷成解析失敗；因此關閉思考（thinkingBudget: 0）並放寬上限。
+const MODEL_NAME = 'gemini-3.5-flash-lite';
+// 輸出 token 上限。gemini-3.5-flash-lite 預設會先「思考」，思考 token 也計入此上限，
+// 512 時常把 3 題中文 JSON 截斷成解析失敗；因此把思考降到最低（thinkingLevel: 'MINIMAL'，
+// 該模型本身的預設值）並放寬上限。Gemini 3 系列已棄用 thinkingBudget，帶上會回
+// 400 INVALID_ARGUMENT，故改用 thinkingLevel。
 export const GEMINI_MAX_OUTPUT_TOKENS = 1024;
 const DEFAULT_ALLOWED_ORIGINS = 'https://lwc1129.github.io';
 
@@ -218,7 +220,7 @@ async function callGemini(diffKey, apiKey) {
           maxOutputTokens: GEMINI_MAX_OUTPUT_TOKENS,
           responseMimeType: 'application/json',
           responseSchema: RESPONSE_SCHEMA,
-          thinkingConfig: { thinkingBudget: 0 },
+          thinkingConfig: { thinkingLevel: 'MINIMAL' },
         },
       }),
     }
