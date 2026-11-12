@@ -603,6 +603,7 @@ class TestCallGemini(unittest.TestCase):
             mock_client_cls.assert_called_once_with(api_key="test-api-key")
             kwargs = mock_client.models.generate_content.call_args.kwargs
             self.assertEqual(kwargs["model"], MODEL_NAME)
+            self.assertEqual(MODEL_NAME, "gemini-3.5-flash-lite")
             self.assertEqual(kwargs["contents"], build_prompt(None))
             self.assertEqual(kwargs["config"].response_mime_type, "application/json")
 

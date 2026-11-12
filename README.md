@@ -53,7 +53,7 @@ questions.json              動態題庫（GitHub Actions 每週自動擴充）
 
    | 環境變數 | 必填 | 說明 |
    |---|---|---|
-   | `GEMINI_API_KEY` | 必填 | Google AI Studio API key（使用 `gemini-2.5-flash` 模型） |
+   | `GEMINI_API_KEY` | 必填 | Google AI Studio API key（使用 `gemini-3.5-flash-lite` 模型） |
    | `ALLOWED_ORIGINS` | 選填 | 允許的前端來源，逗號分隔；預設 `https://lwc1129.github.io` |
    | `RATE_LIMIT_MAX` | 選填 | 單一 IP 於視窗內最多請求數；預設 `30` |
    | `RATE_LIMIT_WINDOW_MS` | 選填 | 限流視窗長度（毫秒）；預設 `60000` |

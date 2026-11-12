@@ -617,7 +617,7 @@ test('QUESTION_TYPES：proxy 與前端共用同一份白名單', () => {
   assert.equal(QUESTION_TYPES, LOGIC_QUESTION_TYPES);
 });
 
-test('handler：Gemini 請求關閉 thinking、放寬輸出上限並帶 responseSchema', async () => {
+test('handler：Gemini 請求將 thinking 降到最低、放寬輸出上限並帶 responseSchema', async () => {
   let body;
   const { res } = await runWithFetch(async (_url, init) => {
     body = JSON.parse(init.body);
@@ -627,9 +627,22 @@ test('handler：Gemini 請求關閉 thinking、放寬輸出上限並帶 response
   const cfg = body.generationConfig;
   assert.equal(cfg.maxOutputTokens, GEMINI_MAX_OUTPUT_TOKENS);
   assert.ok(GEMINI_MAX_OUTPUT_TOKENS >= 1024);
-  assert.deepEqual(cfg.thinkingConfig, { thinkingBudget: 0 });
+  // Gemini 3 系列已棄用 thinkingBudget（帶上會回 400），改用 thinkingLevel。
+  assert.deepEqual(cfg.thinkingConfig, { thinkingLevel: 'MINIMAL' });
+  assert.ok(!('thinkingBudget' in cfg.thinkingConfig));
   assert.equal(cfg.responseMimeType, 'application/json');
   assert.deepEqual(cfg.responseSchema, RESPONSE_SCHEMA);
+});
+
+test('handler：Gemini 請求打到 gemini-3.5-flash-lite 模型端點', async () => {
+  let calledUrl;
+  const { res } = await runWithFetch(async (url) => {
+    calledUrl = url;
+    return geminiOk(threeQuestions())();
+  });
+  assert.equal(res.statusCode, 200);
+  assert.ok(String(calledUrl).includes('/models/gemini-3.5-flash-lite:generateContent'));
+  assert.ok(!String(calledUrl).includes('gemini-2.5-flash'));
 });
 
 test('RESPONSE_SCHEMA：3 題、4 選項、題型限白名單、必填欄位齊全', () => {
