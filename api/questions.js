@@ -192,18 +192,15 @@ export const RESPONSE_SCHEMA = {
   },
 };
 
-async function callGemini(diffKey, apiKey) {
-  // 指定題型是 best-effort：模型偏離指定題型時不拒絕，
-  // 回應仍一律由 isValidQuestions 把關。
-  const types = pickPromptTypes();
-  console.log(
-    JSON.stringify({
-      level: 'info',
-      ts: new Date().toISOString(),
-      msg: 'Gemini call 嘗試',
-      ctx: { diffKey, types },
-    })
-  );
+// 結構化 JSON log（格式見 CLAUDE.md 第 2 節）。
+function logJson(level, msg, ctx) {
+  const log = level === 'error' ? console.error : level === 'warn' ? console.warn : console.log;
+  log(JSON.stringify({ level, ts: new Date().toISOString(), msg, ctx }));
+}
+
+// 呼叫 Gemini，回傳模型輸出的原始文字；非 2xx 時記錄 log 並回傳 null。
+// 逾時、網路錯誤、body 非 JSON 會丟例外，由 handler 統一記錄並回 502。
+async function requestGemini(diffKey, types, apiKey) {
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent`,
     {
@@ -226,63 +223,48 @@ async function callGemini(diffKey, apiKey) {
     }
   );
   if (!res.ok) {
-    console.error(
-      JSON.stringify({
-        level: 'error',
-        ts: new Date().toISOString(),
-        msg: 'Gemini 回應非 2xx',
-        ctx: { status: res.status, statusText: res.statusText, diffKey },
-      })
-    );
+    logJson('error', 'Gemini 回應非 2xx', { status: res.status, statusText: res.statusText, diffKey });
     return null;
   }
   const data = await res.json();
-  const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
-  const logParseError = () =>
-    console.error(
-      JSON.stringify({
-        level: 'error',
-        ts: new Date().toISOString(),
-        msg: 'Gemini 回應 JSON 解析失敗',
-        ctx: { diffKey, rawLength: raw.length },
-      })
-    );
-  let qs;
+  return data?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+}
+
+// 純函式：把模型輸出文字解析成陣列。先整段 JSON.parse，失敗再擷取第一個 [...] 區段
+// （模型偶爾包 markdown）。無法解析回傳 undefined（JSON 本身可能就是 null，不能拿 null 當失敗）；
+// 結構是否合法交給 isValidQuestions。
+export function parseQuestionsText(raw) {
   try {
-    qs = JSON.parse(raw);
+    return JSON.parse(raw);
   } catch {
     const m = raw.match(/\[[\s\S]*\]/);
-    if (!m) {
-      logParseError();
-      return null;
-    }
+    if (!m) return undefined;
     try {
-      qs = JSON.parse(m[0]);
+      return JSON.parse(m[0]);
     } catch {
-      logParseError();
-      return null;
+      return undefined;
     }
   }
+}
+
+async function callGemini(diffKey, apiKey) {
+  // 指定題型是 best-effort：模型偏離指定題型時不拒絕，
+  // 回應仍一律由 isValidQuestions 把關。
+  const types = pickPromptTypes();
+  logJson('info', 'Gemini call 嘗試', { diffKey, types });
+  const raw = await requestGemini(diffKey, types, apiKey);
+  if (raw === null) return null;
+  const qs = parseQuestionsText(raw);
+  if (qs === undefined) {
+    logJson('error', 'Gemini 回應 JSON 解析失敗', { diffKey, rawLength: raw.length });
+    return null;
+  }
   if (!isValidQuestions(qs)) {
-    console.error(
-      JSON.stringify({
-        level: 'error',
-        ts: new Date().toISOString(),
-        msg: 'isValidQuestions 驗證失敗',
-        ctx: { diffKey, count: Array.isArray(qs) ? qs.length : 0 },
-      })
-    );
+    logJson('error', 'isValidQuestions 驗證失敗', { diffKey, count: Array.isArray(qs) ? qs.length : 0 });
     return null;
   }
   const questions = qs.slice(0, QUESTIONS_PER_DAY);
-  console.log(
-    JSON.stringify({
-      level: 'info',
-      ts: new Date().toISOString(),
-      msg: 'Gemini 出題成功',
-      ctx: { diffKey, count: questions.length },
-    })
-  );
+  logJson('info', 'Gemini 出題成功', { diffKey, count: questions.length });
   return questions;
 }
 
