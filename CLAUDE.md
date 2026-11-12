@@ -207,9 +207,9 @@ FAIL [streak-10]: 連續天數計算錯誤 — 預期 10，實際 0
 
 ### 已知待處理項目（優先序）
 
-1. `api/questions.js` 的 `callGemini` 約 90 行，可拆出「呼叫」與「解析 + 驗證」兩段。
+目前沒有已知待處理項目；下次重構前依上方清單重新掃描。
 
-已完成（保留紀錄避免重複評估）：render 層已拆到 `js/render/`；silent catch 已補 log（含 `js/analytics.js`）；`isValidQuestions` 已決定只放 `js/logic.js` 由 proxy import；`generate_questions.py` 已對純算式題驗算（`check_arithmetic_answer`，與前端 `checkArithmeticAnswer` 有逐題比對的一致性測試）。
+已完成（保留紀錄避免重複評估）：`callGemini` 已拆為 `requestGemini` / `parseQuestionsText` / `callGemini`；render 層已拆到 `js/render/`；silent catch 已補 log（含 `js/analytics.js`）；`isValidQuestions` 已決定只放 `js/logic.js` 由 proxy import；`generate_questions.py` 已對純算式題驗算（`check_arithmetic_answer`，與前端 `checkArithmeticAnswer` 有逐題比對的一致性測試）。
 
 **Self-check（重構後回答）：**
 - `npm test` 通過了嗎？
