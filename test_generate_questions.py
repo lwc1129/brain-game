@@ -13,6 +13,7 @@ import copy
 import inspect
 import io
 import json
+import re
 import sys
 import types as stdlib_types
 import unittest
@@ -34,6 +35,7 @@ from generate_questions import (
     MAX_QUESTION_LEN,
     compute_type_counts,
     describe_question_defect,
+    refers_to_unseen_content,
     filter_valid_generated_questions,
     merge_question_banks,
     normalize_question_text,
@@ -212,6 +214,61 @@ class TestDescribeQuestionDefect(unittest.TestCase):
         js_types = re.search(r"QUESTION_TYPES = \[([^\]]*)\]", src).group(1)
         from generate_questions import ALLOWED_TYPES
         self.assertEqual(sorted(re.findall(r"'([^']+)'", js_types)), sorted(ALLOWED_TYPES))
+
+
+class TestUnseenContent(unittest.TestCase):
+    """題文自足性檢查，規則與案例需與 js/logic.js 的 refersToUnseenContent 一致。"""
+
+    def test_references_without_inline_content_are_flagged(self):
+        for text in [
+            "剛才清單中的第三樣水果是什麼？",
+            "剛剛看到的數字是多少？",
+            "上述文章的主角是誰？",
+            "上面的圖形有幾個角？",
+            "前面提到的城市在哪裡？",
+            "先前出現的顏色是哪一個？",
+        ]:
+            self.assertTrue(refers_to_unseen_content({"q": text}), text)
+
+    def test_inline_content_and_ordinary_questions_pass(self):
+        for text in [
+            "請記住以下水果：蘋果、香蕉、葡萄。請問剛才說的第二種水果是什麼？",
+            "請記住這串數字 3、8、5，剛才的第二個數字是多少？",
+            "台灣最高的山是哪一座？",
+            "8 × 7 = ？",
+        ]:
+            self.assertFalse(refers_to_unseen_content({"q": text}), text)
+
+    def test_non_dict_or_non_string_is_not_flagged(self):
+        self.assertFalse(refers_to_unseen_content(None))
+        self.assertFalse(refers_to_unseen_content({}))
+        self.assertFalse(refers_to_unseen_content({"q": 123}))
+
+    def test_unseen_reference_is_a_question_defect(self):
+        q = {"type": "記憶", "q": "剛才清單中的第三樣水果是什麼？", "a": "香蕉",
+             "opts": ["香蕉", "蘋果", "葡萄", "西瓜"]}
+        self.assertIn("題文以外的內容", describe_question_defect(q))
+        inline = {**q, "q": "請記住：蘋果、葡萄、香蕉。剛才清單中的第三樣水果是什麼？"}
+        self.assertIsNone(describe_question_defect(inline))
+
+    def test_regex_sources_match_js(self):
+        from generate_questions import INLINE_CONTENT, UNSEEN_REF
+        with open("js/logic.js", encoding="utf-8") as f:
+            src = f.read()
+        self.assertEqual(re.search(r"const UNSEEN_REF = /(.+)/;", src).group(1), UNSEEN_REF.pattern)
+        self.assertEqual(re.search(r"const INLINE_CONTENT = /(.+)/;", src).group(1), INLINE_CONTENT.pattern)
+
+    def test_current_bank_has_no_unseen_references(self):
+        with open("questions.json", encoding="utf-8") as f:
+            bank = json.load(f)
+        hits = [q["q"] for qs in bank.values() for q in qs if refers_to_unseen_content(q)]
+        self.assertEqual(hits, [])
+
+    def test_prompt_requires_self_contained_questions(self):
+        from generate_questions import build_prompt
+        prompt = build_prompt()
+        self.assertIn("只看題文就能作答", prompt)
+        self.assertTrue(prompt.rstrip().endswith("只回傳純JSON物件，不要有任何其他文字或markdown。"))
 
 
 class TestArithmeticCheck(unittest.TestCase):

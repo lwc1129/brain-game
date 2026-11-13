@@ -12,6 +12,7 @@ import handler, {
   GEMINI_TIMEOUT_MS,
   getClientKey,
   isValidQuestions,
+  LIVE_QUESTION_TYPES,
   parseQuestionsText,
   pickPromptTypes,
   pruneStore,
@@ -30,7 +31,9 @@ beforeEach(() => resetQuestionCache());
 
 // ── 測試輔助 ───────────────────────────────────────────────────────────────
 function makeQuestion(text = '1 + 1 = ？') {
-  return { type: '計算', q: text, a: '2', opts: ['2', '3', '1', '4'] };
+  // 「計算」題在即時出題必須是純算式；自訂題文的夾具改用「常識」。
+  const type = text === '1 + 1 = ？' ? '計算' : '常識';
+  return { type, q: text, a: '2', opts: ['2', '3', '1', '4'] };
 }
 
 function threeQuestions() {
@@ -209,6 +212,29 @@ test('pickPromptTypes：回傳 3 種互不相同的白名單題型', () => {
   for (const t of picked) assert.ok(QUESTION_TYPES.includes(t));
   // 注入固定亂數：永遠取第一個 → 依序為白名單前三型
   assert.deepEqual(pickPromptTypes(() => 0), QUESTION_TYPES.slice(0, 3));
+});
+
+test('即時出題不出「記憶」題型：題型池、通用題型清單、schema 都不含', () => {
+  assert.ok(QUESTION_TYPES.includes('記憶'), '題庫白名單仍保留記憶');
+  assert.ok(!LIVE_QUESTION_TYPES.includes('記憶'));
+  assert.equal(LIVE_QUESTION_TYPES.length, QUESTION_TYPES.length - 1);
+  // 各種亂數值下都抽不到「記憶」
+  for (const r of [0, 0.3, 0.6, 0.999]) assert.ok(!pickPromptTypes(() => r).includes('記憶'));
+  assert.ok(!buildPrompt('easy').includes('記憶'));
+  assert.ok(!RESPONSE_SCHEMA.items.properties.type.enum.includes('記憶'));
+});
+
+test('buildPrompt：指定「記憶」時視為不合法題型，退回通用題型清單', () => {
+  const p = buildPrompt('easy', ['計算', '記憶', '邏輯']);
+  assert.ok(p.includes('題型只能從以下選擇'));
+  assert.ok(!p.includes('記憶'));
+});
+
+test('buildPrompt：要求題文自足、計算題為純算式，且封閉指令仍在最後', () => {
+  const p = buildPrompt('medium', ['計算', '邏輯', '常識']);
+  assert.ok(p.includes('只看題文就能作答'));
+  assert.ok(p.includes('以「= ？」結尾'));
+  assert.ok(p.trimEnd().endsWith('只回傳JSON陣列，不要其他文字或markdown：\n[{...},{...},{...}]'));
 });
 
 test('buildPrompt：指定 3 種合法題型時逐一點名，且保留封閉指令', () => {
@@ -652,7 +678,7 @@ test('RESPONSE_SCHEMA：3 題、4 選項、題型限白名單、必填欄位齊�
   assert.equal(RESPONSE_SCHEMA.maxItems, 3);
   const item = RESPONSE_SCHEMA.items;
   assert.deepEqual(item.required, ['type', 'q', 'a', 'opts']);
-  assert.deepEqual(item.properties.type.enum, QUESTION_TYPES);
+  assert.deepEqual(item.properties.type.enum, LIVE_QUESTION_TYPES);
   assert.equal(item.properties.opts.minItems, 4);
   assert.equal(item.properties.opts.maxItems, 4);
 });

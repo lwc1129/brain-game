@@ -15,6 +15,7 @@ import {
   isValidQuestion,
   isValidQuestionBank,
   isValidQuestions,
+  refersToUnseenContent,
   MAX_HISTORY_LOG,
   MAX_OPTION_LEN,
   MAX_QUESTION_LEN,
@@ -28,7 +29,9 @@ import {
 } from '../js/logic.js';
 
 function makeQuestion(text = '1 + 1 = ？') {
-  return { type: '計算', q: text, a: '2', opts: ['2', '3', '1', '4'] };
+  // 「計算」題在即時出題必須是純算式；自訂題文的夾具改用「常識」。
+  const type = text === '1 + 1 = ？' ? '計算' : '常識';
+  return { type, q: text, a: '2', opts: ['2', '3', '1', '4'] };
 }
 
 function makeBank(n = 3) {
@@ -538,6 +541,74 @@ test('isValidQuestions：純算式題答案算錯時整組不通過', () => {
   const right = { ...wrong, a: '56' };
   assert.equal(isValidQuestions([right, makeQuestion('b？'), makeQuestion('c？')]), true);
   assert.equal(isValidQuestions([wrong, makeQuestion('b？'), makeQuestion('c？')]), false);
+});
+
+// ── 即時 AI 出題品質閘門 ─────────────────────────────────────────────────
+const okQ = () => makeQuestion('天空是什麼顏色？');
+const liveSet = (q) => [q, okQ(), okQ()];
+
+test('refersToUnseenContent：引用題文以外的內容才算', () => {
+  for (const q of [
+    '剛才清單中的第三樣水果是什麼？',
+    '剛剛看到的數字是多少？',
+    '上述文章的主角是誰？',
+    '上面的圖形有幾個角？',
+    '前面提到的城市在哪裡？',
+    '先前出現的顏色是哪一個？',
+  ]) {
+    assert.equal(refersToUnseenContent({ q }), true, q);
+  }
+  for (const q of [
+    '請記住以下水果：蘋果、香蕉、葡萄。請問剛才說的第二種水果是什麼？',
+    '請記住這串數字 3、8、5，剛才的第二個數字是多少？',
+    '台灣最高的山是哪一座？',
+    '8 × 7 = ？',
+  ]) {
+    assert.equal(refersToUnseenContent({ q }), false, q);
+  }
+});
+
+test('refersToUnseenContent：非物件或 q 不是字串時回傳 false（結構交給 isValidQuestion）', () => {
+  assert.equal(refersToUnseenContent(null), false);
+  assert.equal(refersToUnseenContent({}), false);
+  assert.equal(refersToUnseenContent({ q: 123 }), false);
+});
+
+test('isValidQuestions：題文引用沒看過的內容時整組不通過', () => {
+  const bad = { type: '記憶', q: '剛才清單中的第三樣水果是什麼？', a: '香蕉', opts: ['香蕉', '蘋果', '葡萄', '西瓜'] };
+  assert.equal(isValidQuestions(liveSet(bad)), false);
+  const inline = { ...bad, q: '請記住：蘋果、葡萄、香蕉。剛才清單中的第三樣水果是什麼？' };
+  assert.equal(isValidQuestions(liveSet(inline)), true);
+});
+
+test('isValidQuestions：「計算」題必須是純算式，應用題與帶前綴的算式不收', () => {
+  const word = { type: '計算', q: '一顆蘋果 15 元，買 3 顆要多少元？', a: '45元', opts: ['45元', '40元', '35元', '50元'] };
+  assert.equal(isValidQuestions(liveSet(word)), false, '應用題即使答案正確也無法驗算');
+  const prefixed = { type: '計算', q: '請問 8 × 7 = ？', a: '56', opts: ['56', '54', '58', '64'] };
+  assert.equal(isValidQuestions(liveSet(prefixed)), false);
+  const pure = { type: '計算', q: '8 × 7 = ？', a: '56', opts: ['56', '54', '58', '64'] };
+  assert.equal(isValidQuestions(liveSet(pure)), true);
+  assert.equal(isValidQuestions(liveSet({ ...pure, a: '54' })), false);
+});
+
+test('isValidQuestions：非計算題型不要求純算式，但剛好是純算式時仍要算對', () => {
+  const logic = { type: '邏輯', q: '3 + 4 = ？', a: '7', opts: ['7', '6', '8', '9'] };
+  assert.equal(isValidQuestions(liveSet(logic)), true);
+  assert.equal(isValidQuestions(liveSet({ ...logic, a: '8' })), false);
+  // 已知限制：非計算題的答案對錯不在檢查範圍（數列答錯仍會通過）。
+  const seq = { type: '數列', q: '2、4、8、16，下一個數是多少？', a: '24', opts: ['24', '32', '20', '18'] };
+  assert.equal(isValidQuestions(liveSet(seq)), true);
+});
+
+test('refersToUnseenContent：現有題庫與內建題庫命中數為 0', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const { QB_FALLBACK } = await import('../js/fallback-questions.js');
+  const bank = JSON.parse(await readFile(new URL('../questions.json', import.meta.url), 'utf8'));
+  const hits = [];
+  for (const src of [bank, QB_FALLBACK]) {
+    for (const d of Object.keys(src)) for (const q of src[d]) if (refersToUnseenContent(q)) hits.push(q.q);
+  }
+  assert.deepEqual(hits, []);
 });
 
 test('checkArithmeticAnswer：題庫與內建題庫的純算式題全部算對', async () => {

@@ -17,6 +17,11 @@ export const MAX_HISTORY_LOG = 30;
 // api/questions.js 由此 import，prompt 插值與回應驗證共用同一份清單。
 export const QUESTION_TYPES = ['邏輯', '計算', '數列', '推理', '語言', '記憶', '常識'];
 
+// 即時 AI 出題可用的題型：不含「記憶」。目前介面是單一畫面的選擇題，
+// 無法「先出示內容、遮住、再作答」，即時產生的記憶題容易引用玩家沒看過的內容。
+// 題庫（questions.json）裡既有的記憶題不受影響，仍以 QUESTION_TYPES 驗證。
+export const LIVE_QUESTION_TYPES = QUESTION_TYPES.filter((t) => t !== '記憶');
+
 // 題目與選項長度上限：擋下模型失控輸出的長篇文字，避免破版。
 // 現有題庫最長題目 134 字、最長選項 57 字，上限留有餘裕。
 export const MAX_QUESTION_LEN = 200;
@@ -267,12 +272,33 @@ export function checkArithmeticAnswer(q) {
   return Math.abs(Number(ans[0]) - expected) < 1e-9;
 }
 
-// 驗證 AI proxy 回傳的單日題組：結構合法，且純算式題的答案必須算得對。
+// ── 題文自足性檢查 ───────────────────────────────────────────────────────
+// 題文指涉「先前看過的內容」（剛才的清單、上述文章…），卻沒有在題文內附上該內容，
+// 玩家無從作答。題文內自帶內容的題目（有冒號，或「請記住…」）不算。
+// 規則需與 generate_questions.py 的 refers_to_unseen_content 一致。
+const UNSEEN_REF = /剛才|剛剛|上述|上面的|前面(提到|說)|先前/;
+const INLINE_CONTENT = /[：:]|記住|請記/;
+
+export function refersToUnseenContent(q) {
+  const text = typeof q?.q === 'string' ? q.q : '';
+  return UNSEEN_REF.test(text) && !INLINE_CONTENT.test(text);
+}
+
+// 驗證 AI proxy 回傳的單日題組（即時出題，沒有人工把關，規則比題庫嚴格）：
+// - 結構合法（isValidQuestion）
+// - 題文不可指涉玩家沒看過的內容
+// - 「計算」題必須是可驗算的純算式且答案正確；應用題無法驗算，一律不收
+// - 其他題型若剛好是純算式，答案也必須算得對
+// 不在檢查範圍：非計算題的答案對錯、簡繁體、難度是否合適。
 export function isValidQuestions(qs) {
   return (
     Array.isArray(qs) &&
     qs.length >= QUESTIONS_PER_DAY &&
-    qs.every((q) => isValidQuestion(q) && checkArithmeticAnswer(q) !== false)
+    qs.every((q) => {
+      if (!isValidQuestion(q) || refersToUnseenContent(q)) return false;
+      const arith = checkArithmeticAnswer(q);
+      return q.type === '計算' ? arith === true : arith !== false;
+    })
   );
 }
 
