@@ -18,11 +18,13 @@ import {
 } from './logic.js';
 import {
   bumpAiRetryVersion,
+  DAILY_KEY_KEEP_DAYS,
   isAiGeneratedForDiff,
   loadFontScale,
   loadHistory,
   loadRecentQuestionTexts,
   loadTodayData,
+  pruneOldDailyKeys,
   recordRecentQuestions,
   saveFontScale,
   saveHistory,
@@ -316,6 +318,10 @@ async function init() {
   initAnalytics();
   initFontControls();
   document.getElementById('todayDate').textContent = formatFullDate(NOW);
+  // 清掉 DAILY_KEY_KEEP_DAYS 天以前的每日資料，避免 localStorage 只增不減。
+  const cutoff = new Date(NOW);
+  cutoff.setDate(cutoff.getDate() - DAILY_KEY_KEEP_DAYS);
+  pruneOldDailyKeys(formatDateKey(cutoff));
   _data = loadTodayData(TODAY);
   _hist = loadHistory();
   syncAiGeneratedFlag();

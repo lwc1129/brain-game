@@ -29,10 +29,40 @@ function readJson(key) {
   }
 }
 
+// 每日資料只保留最近幾天；更早的 today / ai-cache / ai-flag / ai-retry 一律清掉。
+// 這些鍵只有當天會被讀取，保留 7 天是為了跨日與時區邊界留餘裕。
+export const DAILY_KEY_KEEP_DAYS = 7;
+
+// 刪除日期早於 cutoffDateKey（YYYY-MM-DD）的每日鍵。history、recent:*、font-scale 不含日期，不會被刪。
+export function pruneOldDailyKeys(cutoffDateKey) {
+  try {
+    const prefix = `${APP_NAMESPACE}:`;
+    const dated = /:(\d{4}-\d{2}-\d{2})(?::|$)/;
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const k = localStorage.key(i);
+      if (!k || !k.startsWith(prefix)) continue;
+      const m = dated.exec(k);
+      if (m && m[1] < cutoffDateKey) localStorage.removeItem(k);
+    }
+  } catch (e) {
+    logError({ op: 'pruneOldDailyKeys' }, e);
+  }
+}
+
 export function loadTodayData(today) {
   const def = { steps: null, questions: null, answers: [], completed: false, aiGenerated: false };
   const saved = readJson(`today:${today}`);
-  return saved ? { ...def, ...saved } : def;
+  if (!saved) return def;
+  const ok =
+    typeof saved === 'object' &&
+    !Array.isArray(saved) &&
+    (saved.questions == null || (Array.isArray(saved.questions) && saved.questions.length === 3)) &&
+    (saved.answers === undefined || Array.isArray(saved.answers));
+  if (!ok) {
+    logError({ op: 'loadTodayData', today }, new Error('today 結構不符，改用預設值'));
+    return def;
+  }
+  return { ...def, ...saved };
 }
 
 export function saveTodayData(today, data) {
@@ -40,7 +70,16 @@ export function saveTodayData(today, data) {
 }
 
 export function loadHistory() {
-  return readJson('history') || { total: 0, streak: 0, lastDate: null, log: [] };
+  const def = { total: 0, streak: 0, lastDate: null, log: [] };
+  const h = readJson('history');
+  if (!h) return def;
+  const ok =
+    typeof h === 'object' && Array.isArray(h.log) && Number.isFinite(h.total) && Number.isFinite(h.streak);
+  if (!ok) {
+    logError({ op: 'loadHistory' }, new Error('history 結構不符，改用預設值'));
+    return def;
+  }
+  return h;
 }
 
 export function saveHistory(hist) {
