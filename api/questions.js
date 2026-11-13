@@ -11,7 +11,7 @@
 
 // isValidQuestions 與前端 js/logic.js 共用，避免 proxy 與前端驗證邏輯漂移。
 // Vercel serverless 可直接 import 同 repo 的 ES module。
-import { isValidQuestions, QUESTION_TYPES, LIVE_QUESTION_TYPES } from '../js/logic.js';
+import { isValidQuestions, describeQuestionsDefect, QUESTION_TYPES, LIVE_QUESTION_TYPES } from '../js/logic.js';
 
 export { isValidQuestions, QUESTION_TYPES, LIVE_QUESTION_TYPES };
 
@@ -263,8 +263,16 @@ async function callGemini(diffKey, apiKey) {
     logJson('error', 'Gemini 回應 JSON 解析失敗', { diffKey, rawLength: raw.length });
     return null;
   }
-  if (!isValidQuestions(qs)) {
-    logJson('error', 'isValidQuestions 驗證失敗', { diffKey, count: Array.isArray(qs) ? qs.length : 0 });
+  // describeQuestionsDefect 是 isValidQuestions 的判斷本體；這裡直接取缺陷原因寫進 log，
+  // 才能分辨是模型出了壞題，還是規則誤擋。
+  const defect = describeQuestionsDefect(qs);
+  if (defect) {
+    logJson('error', 'isValidQuestions 驗證失敗', {
+      diffKey,
+      count: Array.isArray(qs) ? qs.length : 0,
+      types,
+      defect,
+    });
     return null;
   }
   const questions = qs.slice(0, QUESTIONS_PER_DAY);

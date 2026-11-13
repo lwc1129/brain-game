@@ -15,6 +15,8 @@ import {
   isValidQuestion,
   isValidQuestionBank,
   isValidQuestions,
+  describeQuestionsDefect,
+  DEFECT_LOG_TEXT_LEN,
   refersToUnseenContent,
   MAX_HISTORY_LOG,
   MAX_OPTION_LEN,
@@ -598,6 +600,42 @@ test('isValidQuestions：非計算題型不要求純算式，但剛好是純算�
   // 已知限制：非計算題的答案對錯不在檢查範圍（數列答錯仍會通過）。
   const seq = { type: '數列', q: '2、4、8、16，下一個數是多少？', a: '24', opts: ['24', '32', '20', '18'] };
   assert.equal(isValidQuestions(liveSet(seq)), true);
+});
+
+test('describeQuestionsDefect：合法題組回傳 null，與 isValidQuestions 一致', () => {
+  assert.equal(describeQuestionsDefect(liveSet(okQ())), null);
+  assert.equal(isValidQuestions(liveSet(okQ())), true);
+});
+
+test('describeQuestionsDefect：題組層級的缺陷', () => {
+  assert.deepEqual(describeQuestionsDefect(null), { rule: 'not_array' });
+  assert.deepEqual(describeQuestionsDefect('x'), { rule: 'not_array' });
+  assert.deepEqual(describeQuestionsDefect([okQ(), okQ()]), { rule: 'too_few' });
+});
+
+test('describeQuestionsDefect：各規則回報代碼、題號、題型與題文', () => {
+  const cases = [
+    ['structure', { type: '常識', q: '缺選項？', a: '2', opts: ['2', '3'] }],
+    ['unseen_content', { type: '常識', q: '剛才清單中的第三樣水果是什麼？', a: '2', opts: ['2', '3', '1', '4'] }],
+    ['calc_not_arithmetic', { type: '計算', q: '一顆蘋果 15 元，買 3 顆要多少元？', a: '45元', opts: ['45元', '40元', '35元', '50元'] }],
+    ['arithmetic_wrong', { type: '計算', q: '7 × 8 = ？', a: '54', opts: ['54', '56', '58', '64'] }],
+    ['arithmetic_wrong', { type: '邏輯', q: '3 + 4 = ？', a: '8', opts: ['7', '6', '8', '9'] }],
+  ];
+  for (const [rule, bad] of cases) {
+    const qs = [okQ(), bad, okQ()];
+    assert.deepEqual(describeQuestionsDefect(qs), { rule, index: 1, type: bad.type, q: bad.q }, rule);
+    assert.equal(isValidQuestions(qs), false, rule);
+  }
+});
+
+test('describeQuestionsDefect：只回報第一個缺陷；題文截斷；非物件題目不拋錯', () => {
+  const longQ = { type: '計算', q: `${'字'.repeat(150)}？`, a: '2', opts: ['2', '3', '1', '4'] };
+  const d = describeQuestionsDefect([longQ, { type: '計算', q: '7 × 8 = ？', a: '54', opts: ['54', '56', '58', '64'] }, okQ()]);
+  assert.equal(d.index, 0);
+  assert.equal(d.rule, 'calc_not_arithmetic');
+  assert.equal(d.q.length, DEFECT_LOG_TEXT_LEN);
+  assert.deepEqual(describeQuestionsDefect([null, okQ(), okQ()]), { rule: 'structure', index: 0, type: null, q: null });
+  assert.deepEqual(describeQuestionsDefect([{ type: 5, q: 7 }, okQ(), okQ()]), { rule: 'structure', index: 0, type: null, q: null });
 });
 
 test('refersToUnseenContent：現有題庫與內建題庫命中數為 0', async () => {

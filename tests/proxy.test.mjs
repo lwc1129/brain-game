@@ -699,6 +699,11 @@ test('handler：Gemini 回傳算錯的純算式題時回 502', async () => {
   const { res, errors } = await runWithFetch(geminiOk([wrong, makeQuestion('b？'), makeQuestion('c？')]));
   assert.equal(res.statusCode, 502);
   assert.ok(errors.some((m) => m.includes('isValidQuestions 驗證失敗')));
+  // log 需帶出是哪條規則、哪一題，才能分辨模型壞題與規則誤擋
+  const entry = JSON.parse(errors.find((m) => m.includes('isValidQuestions 驗證失敗')));
+  assert.deepEqual(entry.ctx.defect, { rule: 'arithmetic_wrong', index: 0, type: '計算', q: '7 × 8 = ？' });
+  assert.equal(entry.ctx.count, 3);
+  assert.equal(entry.ctx.types.length, 3);
 });
 
 // ── 題目快取 ─────────────────────────────────────────────────────────────
@@ -857,5 +862,7 @@ test('handler：模型回傳 JSON null 時記錄「驗證失敗」而非「解�
   }));
   assert.equal(res.statusCode, 502);
   assert.ok(errors.some((m) => m.includes('isValidQuestions 驗證失敗')));
+  const entry = JSON.parse(errors.find((m) => m.includes('isValidQuestions 驗證失敗')));
+  assert.deepEqual(entry.ctx.defect, { rule: 'not_array' });
   assert.ok(!errors.some((m) => m.includes('JSON 解析失敗')));
 });

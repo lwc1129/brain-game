@@ -291,15 +291,35 @@ export function refersToUnseenContent(q) {
 // - 其他題型若剛好是純算式，答案也必須算得對
 // 不在檢查範圍：非計算題的答案對錯、簡繁體、難度是否合適。
 export function isValidQuestions(qs) {
-  return (
-    Array.isArray(qs) &&
-    qs.length >= QUESTIONS_PER_DAY &&
-    qs.every((q) => {
-      if (!isValidQuestion(q) || refersToUnseenContent(q)) return false;
+  return describeQuestionsDefect(qs) === null;
+}
+
+// 記錄用的題文截斷長度：足以辨認是哪一題，又不讓 log 被長文塞滿。
+export const DEFECT_LOG_TEXT_LEN = 80;
+
+// isValidQuestions 的判斷本體：合法回傳 null，否則回傳第一個缺陷，供 proxy 寫進 log。
+// rule 為固定代碼：not_array / too_few / structure / unseen_content /
+// calc_not_arithmetic（計算題不是純算式）/ arithmetic_wrong（純算式答案算錯）。
+// index、type、q 只在單題缺陷時提供；type 與 q 來自模型輸出，一律截斷且只供記錄。
+export function describeQuestionsDefect(qs) {
+  if (!Array.isArray(qs)) return { rule: 'not_array' };
+  if (qs.length < QUESTIONS_PER_DAY) return { rule: 'too_few' };
+  for (let index = 0; index < qs.length; index++) {
+    const q = qs[index];
+    let rule = null;
+    if (!isValidQuestion(q)) rule = 'structure';
+    else if (refersToUnseenContent(q)) rule = 'unseen_content';
+    else {
       const arith = checkArithmeticAnswer(q);
-      return q.type === '計算' ? arith === true : arith !== false;
-    })
-  );
+      if (arith === false) rule = 'arithmetic_wrong';
+      else if (q.type === '計算' && arith !== true) rule = 'calc_not_arithmetic';
+    }
+    if (rule) {
+      const clip = (v) => (typeof v === 'string' ? v.slice(0, DEFECT_LOG_TEXT_LEN) : null);
+      return { rule, index, type: clip(q?.type), q: clip(q?.q) };
+    }
+  }
+  return null;
 }
 
 // 等待 promise 最多 ms 毫秒：如期完成回傳 { done: true, value }，逾時回傳 { done: false }。
