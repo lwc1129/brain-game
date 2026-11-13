@@ -33,6 +33,21 @@ const MAX_TRACKED_KEYS = 10_000;
 // Gemini 呼叫逾時。必須小於前端 FETCH_TIMEOUT_MS（js/ai.js，8000ms），
 // 讓 proxy 先放棄並回 502 + 結構化 log，而不是前端先 abort、後端無聲掛著。
 export const GEMINI_TIMEOUT_MS = 7_000;
+// Gemini 回 503（服務暫時過載）時的重試。2026-11-13 正式站實測 28 次請求有 9 次 503，
+// 而 503 通常 1～2 秒內就回來，還有時間再試一次。
+// - 只重試 503：4xx 是請求本身的問題，重試無用；逾時代表時間已用完。
+// - 兩次嘗試共用 GEMINI_TIMEOUT_MS 這一個總時限（第二次只拿剩餘時間），
+//   所以 proxy 仍然一定比前端 FETCH_TIMEOUT_MS 先放棄。
+// - 剩餘時間不足 GEMINI_RETRY_MIN_BUDGET_MS 就不重試：實測成功的出題約需 1.5～3 秒，
+//   時間不夠的重試只會白白消耗配額。
+export const GEMINI_MAX_ATTEMPTS = 2;
+export const GEMINI_RETRY_DELAY_MS = 300;
+export const GEMINI_RETRY_MIN_BUDGET_MS = 2_500;
+
+// 純函式：這次失敗後是否值得再試一次。attempt 從 1 起算，remainingMs 為扣掉等待後的剩餘時限。
+export function shouldRetryGemini(status, attempt, remainingMs) {
+  return status === 503 && attempt < GEMINI_MAX_ATTEMPTS && remainingMs >= GEMINI_RETRY_MIN_BUDGET_MS;
+}
 
 // 記憶體型滑動視窗限流狀態（來源 → 命中時間戳陣列）。
 //
@@ -202,36 +217,51 @@ function logJson(level, msg, ctx) {
   log(JSON.stringify({ level, ts: new Date().toISOString(), msg, ctx }));
 }
 
-// 呼叫 Gemini，回傳模型輸出的原始文字；非 2xx 時記錄 log 並回傳 null。
-// 逾時、網路錯誤、body 非 JSON 會丟例外，由 handler 統一記錄並回 502。
+// 呼叫 Gemini，回傳模型輸出的原始文字；非 2xx 時記錄 log 並回傳 null（503 會依
+// shouldRetryGemini 重試一次）。逾時、網路錯誤、body 非 JSON 會丟例外，由 handler 統一記錄並回 502。
 async function requestGemini(diffKey, types, apiKey) {
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-goog-api-key': apiKey,
-      },
-      signal: AbortSignal.timeout(GEMINI_TIMEOUT_MS),
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: buildPrompt(diffKey, types) }] }],
-        generationConfig: {
-          temperature: 0.7,
-          maxOutputTokens: GEMINI_MAX_OUTPUT_TOKENS,
-          responseMimeType: 'application/json',
-          responseSchema: RESPONSE_SCHEMA,
-          thinkingConfig: { thinkingLevel: 'MINIMAL' },
+  const deadline = Date.now() + GEMINI_TIMEOUT_MS;
+  const body = JSON.stringify({
+    contents: [{ parts: [{ text: buildPrompt(diffKey, types) }] }],
+    generationConfig: {
+      temperature: 0.7,
+      maxOutputTokens: GEMINI_MAX_OUTPUT_TOKENS,
+      responseMimeType: 'application/json',
+      responseSchema: RESPONSE_SCHEMA,
+      thinkingConfig: { thinkingLevel: 'MINIMAL' },
+    },
+  });
+  for (let attempt = 1; ; attempt++) {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': apiKey,
         },
-      }),
+        // 第一次是完整的 GEMINI_TIMEOUT_MS；重試只拿剩餘時間。
+        signal: AbortSignal.timeout(Math.max(1, deadline - Date.now())),
+        body,
+      }
+    );
+    if (res.ok) {
+      if (attempt > 1) logJson('info', 'Gemini 重試後成功', { diffKey, attempt });
+      const data = await res.json();
+      return data?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
     }
-  );
-  if (!res.ok) {
-    logJson('error', 'Gemini 回應非 2xx', { status: res.status, statusText: res.statusText, diffKey });
-    return null;
+    const remainingMs = deadline - Date.now() - GEMINI_RETRY_DELAY_MS;
+    const willRetry = shouldRetryGemini(res.status, attempt, remainingMs);
+    logJson('error', 'Gemini 回應非 2xx', {
+      status: res.status,
+      statusText: res.statusText,
+      diffKey,
+      attempt,
+      willRetry,
+    });
+    if (!willRetry) return null;
+    await new Promise((resolve) => setTimeout(resolve, GEMINI_RETRY_DELAY_MS));
   }
-  const data = await res.json();
-  return data?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
 }
 
 // 純函式：把模型輸出文字解析成陣列。先整段 JSON.parse，失敗再擷取第一個 [...] 區段

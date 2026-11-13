@@ -10,6 +10,10 @@ import handler, {
   checkRateLimit,
   GEMINI_MAX_OUTPUT_TOKENS,
   GEMINI_TIMEOUT_MS,
+  GEMINI_MAX_ATTEMPTS,
+  GEMINI_RETRY_DELAY_MS,
+  GEMINI_RETRY_MIN_BUDGET_MS,
+  shouldRetryGemini,
   getClientKey,
   isValidQuestions,
   LIVE_QUESTION_TYPES,
@@ -632,6 +636,81 @@ test('handler：呼叫 Gemini 時帶上逾時 signal', async () => {
   assert.equal(res.statusCode, 200);
   assert.ok(seenSignal instanceof AbortSignal);
   assert.equal(seenSignal.aborted, false);
+});
+
+// ── Gemini 503 重試 ──────────────────────────────────────────────────────
+const gemini503 = () => ({ ok: false, status: 503, statusText: 'Service Unavailable', json: async () => ({}) });
+
+test('shouldRetryGemini：只有 503、未達嘗試上限、剩餘時間足夠才重試', () => {
+  const enough = GEMINI_RETRY_MIN_BUDGET_MS;
+  assert.equal(shouldRetryGemini(503, 1, enough), true);
+  // 邊界：剩餘時間剛好等於下限可重試，少 1ms 不行
+  assert.equal(shouldRetryGemini(503, 1, enough - 1), false);
+  // 已達嘗試上限
+  assert.equal(shouldRetryGemini(503, GEMINI_MAX_ATTEMPTS, enough), false);
+  // 其他狀態碼一律不重試
+  for (const status of [400, 401, 403, 404, 429, 500, 502, 504]) {
+    assert.equal(shouldRetryGemini(status, 1, enough), false, String(status));
+  }
+});
+
+test('重試常數：最多 2 次，且等待加上最低剩餘時間仍在總時限內', () => {
+  assert.equal(GEMINI_MAX_ATTEMPTS, 2);
+  assert.ok(GEMINI_RETRY_DELAY_MS > 0);
+  assert.ok(GEMINI_RETRY_DELAY_MS + GEMINI_RETRY_MIN_BUDGET_MS < GEMINI_TIMEOUT_MS);
+});
+
+test('handler：Gemini 第一次回 503、重試成功時回 200，且只多呼叫一次', async () => {
+  let calls = 0;
+  const { res, errors } = await runWithFetch(async () => {
+    calls += 1;
+    return calls === 1 ? gemini503() : geminiOk(threeQuestions())();
+  });
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.questions.length, 3);
+  assert.equal(calls, 2);
+  const entry = JSON.parse(errors.find((m) => m.includes('Gemini 回應非 2xx')));
+  assert.equal(entry.ctx.attempt, 1);
+  assert.equal(entry.ctx.willRetry, true);
+});
+
+test('handler：Gemini 連續兩次 503 時回 502，不再試第三次', async () => {
+  let calls = 0;
+  const { res, errors } = await runWithFetch(async () => {
+    calls += 1;
+    return gemini503();
+  });
+  assert.equal(res.statusCode, 502);
+  assert.deepEqual(res.body, { error: 'generation failed' });
+  assert.equal(calls, GEMINI_MAX_ATTEMPTS);
+  const entries = errors.filter((m) => m.includes('Gemini 回應非 2xx')).map((m) => JSON.parse(m).ctx);
+  assert.deepEqual(entries.map((c) => [c.attempt, c.willRetry]), [[1, true], [2, false]]);
+});
+
+test('handler：Gemini 回 400 或 429 時不重試', async () => {
+  for (const status of [400, 429]) {
+    let calls = 0;
+    const { res, errors } = await runWithFetch(async () => {
+      calls += 1;
+      return { ok: false, status, statusText: 'x', json: async () => ({}) };
+    });
+    assert.equal(res.statusCode, 502);
+    assert.equal(calls, 1, String(status));
+    assert.equal(JSON.parse(errors.find((m) => m.includes('Gemini 回應非 2xx'))).ctx.willRetry, false);
+  }
+});
+
+test('handler：重試時逾時 signal 只拿剩餘時間，逾時仍回 502', async () => {
+  let calls = 0;
+  const { res, errors } = await runWithFetch(async (_url, init) => {
+    calls += 1;
+    if (calls === 1) return gemini503();
+    assert.ok(init.signal instanceof AbortSignal);
+    throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+  });
+  assert.equal(res.statusCode, 502);
+  assert.equal(calls, 2);
+  assert.ok(errors.some((m) => m.includes('Gemini 呼叫例外')));
 });
 
 test('GEMINI_TIMEOUT_MS：必須小於前端 FETCH_TIMEOUT_MS（8000ms）', () => {
