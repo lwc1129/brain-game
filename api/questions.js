@@ -30,20 +30,26 @@ const DEFAULT_RATE_LIMIT_MAX = 30;
 const DEFAULT_RATE_LIMIT_WINDOW_MS = 60_000;
 // 限流表的鍵數量上限，超過時觸發清掃，避免記憶體無限成長。
 const MAX_TRACKED_KEYS = 10_000;
-// Gemini 呼叫逾時。必須小於前端 FETCH_TIMEOUT_MS（js/ai.js，8000ms），
-// 讓 proxy 先放棄並回 502 + 結構化 log，而不是前端先 abort、後端無聲掛著。
-export const GEMINI_TIMEOUT_MS = 7_000;
+// Gemini 呼叫逾時。三個時限必須依序遞增，各有測試鎖住：
+//   GEMINI_TIMEOUT_MS（12 秒）< 前端 FETCH_TIMEOUT_MS（js/ai.js，13 秒）
+//   GEMINI_TIMEOUT_MS < vercel.json 的 maxDuration（15 秒）
+// 讓 proxy 先放棄並回 502 + 結構化 log，而不是前端先 abort、或函式被 Vercel 砍掉而沒有 log。
+// 2026-11-13 從 7 秒放寬：當天成功的出題耗時 2.1～7.3 秒，大量失敗卡在 7 秒時限上。
+// 代價是長者最壞要在載入畫面等約 13 秒（輸入步數時已先預取，實際通常更短），
+// 所以載入畫面超過 SLOW_HINT_AFTER_MS（js/render/loading.js）會改顯示等待提示。
+export const GEMINI_TIMEOUT_MS = 12_000;
 // Gemini 回 503（服務暫時過載）時的重試。
 // - 只重試 503：4xx 是請求本身的問題，重試無用；逾時代表時間已用完。
 // - 兩次嘗試共用 GEMINI_TIMEOUT_MS 這一個總時限（第二次只拿剩餘時間），
 //   所以 proxy 仍然一定比前端 FETCH_TIMEOUT_MS 先放棄。
 // - 剩餘時間不足 GEMINI_RETRY_MIN_BUDGET_MS 就不重試：時間不夠的重試只會白白消耗配額。
 //
-// 已知限制（2026-11-13 正式站實測，hard／medium 共 12 次請求，僅此一天的資料）：
+// 實測紀錄（2026-11-13 正式站，hard／medium 共 12 次請求，當時總時限 7 秒，僅此一天的資料）：
 // - 5 次 503 中有 4 次在 4.3～6.5 秒才回來，剩餘時間不足，沒有重試；
 //   另 1 次約 1.9 秒回來、有重試，但重試逾時。重試救回 0 次。
-// - 成功的出題耗時 2.1～7.3 秒，多筆貼近 GEMINI_TIMEOUT_MS。
-// 也就是說，Gemini 慢的時候這個重試幾乎不會觸發；它只在 503 回得快時才有用。
+// - 成功的出題耗時 2.1～7.3 秒。
+// 總時限放寬到 12 秒後，4～6.5 秒回來的 503 會剩 5.5 秒以上而觸發重試；
+// 但 GEMINI_RETRY_MIN_BUDGET_MS 仍是 2.5 秒，低於成功出題常見的耗時，剩餘時間少的重試多半仍會逾時。
 // 調整這三個常數前，先重新量測 503 的回應時間與成功出題的耗時。
 export const GEMINI_MAX_ATTEMPTS = 2;
 export const GEMINI_RETRY_DELAY_MS = 300;

@@ -5,7 +5,10 @@ import { isValidQuestions, QUESTIONS_PER_DAY } from './logic.js';
 import { logError } from './logger.js';
 import { readAiCache, writeAiCache } from './storage.js';
 
-const FETCH_TIMEOUT_MS = 8000;
+// 前端等 proxy 的上限。必須大於 proxy 的 GEMINI_TIMEOUT_MS（api/questions.js，12 秒），
+// 讓 proxy 先放棄並留下 log；逾時後改用題庫出題。輸入步數時就會預取，
+// 所以長者在載入畫面實際等待的時間通常比這個短。
+export const FETCH_TIMEOUT_MS = 13_000;
 const _inflight = {};
 
 export function aiEnabled() {

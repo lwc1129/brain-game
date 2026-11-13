@@ -1,0 +1,7 @@
+{
+  "functions": {
+    "api/questions.js": {
+      "maxDuration": 15
+    }
+  }
+}

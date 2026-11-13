@@ -713,9 +713,18 @@ test('handler：重試時逾時 signal 只拿剩餘時間，逾時仍回 502', a
   assert.ok(errors.some((m) => m.includes('Gemini 呼叫例外')));
 });
 
-test('GEMINI_TIMEOUT_MS：必須小於前端 FETCH_TIMEOUT_MS（8000ms）', () => {
+test('GEMINI_TIMEOUT_MS：必須小於前端 FETCH_TIMEOUT_MS，proxy 才會先放棄並留下 log', async () => {
+  const { FETCH_TIMEOUT_MS } = await import('../js/ai.js');
   assert.ok(GEMINI_TIMEOUT_MS > 0);
-  assert.ok(GEMINI_TIMEOUT_MS < 8000);
+  assert.ok(GEMINI_TIMEOUT_MS < FETCH_TIMEOUT_MS);
+});
+
+test('GEMINI_TIMEOUT_MS：必須小於 vercel.json 的 maxDuration，函式才不會先被 Vercel 砍掉', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const vercel = JSON.parse(await readFile(new URL('../vercel.json', import.meta.url), 'utf8'));
+  const maxDuration = vercel?.functions?.['api/questions.js']?.maxDuration;
+  assert.equal(typeof maxDuration, 'number');
+  assert.ok(GEMINI_TIMEOUT_MS < maxDuration * 1000);
 });
 
 // ── Gemini 請求設定與 prompt 品質 ─────────────────────────────────────────
