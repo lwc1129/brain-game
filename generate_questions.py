@@ -149,7 +149,9 @@ def build_prompt(type_counts=None):
         "   - a：正確答案（字串）\n"
         "   - opts：4 個選項的陣列（字串陣列），互不相同，且 a 必須是 opts 其中之一\n"
         + difficulty_contract
-        + "6. 全部使用繁體中文。\n\n"
+        + "6. 全部使用繁體中文。\n"
+        "7. 每一題都必須只看題文就能作答，不可以引用題文以外的內容（例如「剛才的清單」）；"
+        "需要記憶的內容必須寫在同一題的題文內。\n\n"
         "回傳格式範例（僅示意結構，內容請自行產生）：\n"
         + json.dumps(schema_example, ensure_ascii=False, indent=2)
         + "\n\n只回傳純JSON物件，不要有任何其他文字或markdown。"
@@ -288,6 +290,20 @@ def check_arithmetic_answer(q):
     return abs(float(ans.group()) - expected) < 1e-9
 
 
+# 題文自足性檢查：規則需與 js/logic.js 的 refersToUnseenContent 一致。
+# 題文指涉「先前看過的內容」卻沒有在題文內附上（冒號，或「請記住…」），玩家無從作答。
+UNSEEN_REF = re.compile(r"剛才|剛剛|上述|上面的|前面(提到|說)|先前")
+INLINE_CONTENT = re.compile(r"[：:]|記住|請記")
+
+
+def refers_to_unseen_content(q):
+    """題文是否指涉題文以外、玩家沒看過的內容。"""
+    text = q.get("q") if isinstance(q, dict) else None
+    if not isinstance(text, str):
+        return False
+    return bool(UNSEEN_REF.search(text)) and not INLINE_CONTENT.search(text)
+
+
 def describe_question_defect(q):
     """回傳單題缺陷原因字串；合法則回傳 None。
 
@@ -326,6 +342,8 @@ def describe_question_defect(q):
         return "opts 有重複選項，4 個選項必須互不相同"
     if q["a"] not in opts:
         return "正確答案 a 不在 opts 選項中"
+    if refers_to_unseen_content(q):
+        return f"題文引用了題文以外的內容：{q['q']}"
     if check_arithmetic_answer(q) is False:
         return f"純算式題答案錯誤：{q['q']} 的答案不是 {q['a']}"
     return None

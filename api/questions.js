@@ -11,9 +11,9 @@
 
 // isValidQuestions 與前端 js/logic.js 共用，避免 proxy 與前端驗證邏輯漂移。
 // Vercel serverless 可直接 import 同 repo 的 ES module。
-import { isValidQuestions, QUESTION_TYPES } from '../js/logic.js';
+import { isValidQuestions, QUESTION_TYPES, LIVE_QUESTION_TYPES } from '../js/logic.js';
 
-export { isValidQuestions, QUESTION_TYPES };
+export { isValidQuestions, QUESTION_TYPES, LIVE_QUESTION_TYPES };
 
 const DIFFICULTIES = new Set(['hard', 'medium', 'easy', 'super_easy']);
 const QUESTIONS_PER_DAY = 3;
@@ -143,11 +143,12 @@ const DIFF_DESC = {
 
 // 題型白名單 QUESTION_TYPES 定義於 js/logic.js（與 generate_questions.py 的 ALLOWED_TYPES 對齊），
 // 任何進入 prompt 的題型字串都必須出自這份清單。
+// 即時出題只用其中的 LIVE_QUESTION_TYPES（不含「記憶」，原因見 js/logic.js）。
 
 // 隨機挑 3 種不同題型，讓每日 AI 題目不會固定落在同一類。
 // rand 參數可注入固定值以利測試。
 export function pickPromptTypes(rand = Math.random) {
-  const pool = [...QUESTION_TYPES];
+  const pool = [...LIVE_QUESTION_TYPES];
   const picked = [];
   while (picked.length < QUESTIONS_PER_DAY && pool.length) {
     picked.push(pool.splice(Math.floor(rand() * pool.length), 1)[0]);
@@ -157,14 +158,17 @@ export function pickPromptTypes(rand = Math.random) {
 
 export function buildPrompt(diffKey, types = []) {
   // 插值前先以白名單過濾：不合法的題型字串一律不得進入 prompt。
-  const safeTypes = types.filter((t) => QUESTION_TYPES.includes(t));
+  const safeTypes = types.filter((t) => LIVE_QUESTION_TYPES.includes(t));
   const typeLine =
     safeTypes.length === QUESTIONS_PER_DAY
       ? `請出${QUESTIONS_PER_DAY}題，題型分別為：${safeTypes.join('、')}。\n\n`
-      : `請出${QUESTIONS_PER_DAY}題，題型只能從以下選擇：${QUESTION_TYPES.join('、')}。\n\n`;
+      : `請出${QUESTIONS_PER_DAY}題，題型只能從以下選擇：${LIVE_QUESTION_TYPES.join('、')}。\n\n`;
   return (
     `你是一位認知訓練出題專家，請為台灣的銀髮族長輩出${DIFF_DESC[diffKey]}的繁體中文腦力訓練題目。\n\n` +
     typeLine +
+    // 以下兩行對應 isValidQuestions 的即時出題規則；只改 prompt 不改驗證（或反過來）會讓退回題庫的比例上升。
+    '每一題都必須只看題文就能作答，不可以引用題文以外的內容（例如「剛才的清單」）。\n' +
+    '計算題的題文只能是一行算式，並以「= ？」結尾，例如「8 × 11 − 5 × 4 = ？」，不要出應用題。\n\n' +
     '每題格式為JSON物件：\n' +
     '{"type":"題型","q":"題目文字","a":"正確答案","opts":["選項1","選項2","選項3","選項4"]}\n' +
     '正確答案必須包含在opts陣列中，選項順序隨機。\n\n' +
@@ -182,7 +186,7 @@ export const RESPONSE_SCHEMA = {
   items: {
     type: 'OBJECT',
     properties: {
-      type: { type: 'STRING', enum: QUESTION_TYPES },
+      type: { type: 'STRING', enum: LIVE_QUESTION_TYPES },
       q: { type: 'STRING' },
       a: { type: 'STRING' },
       opts: { type: 'ARRAY', minItems: 4, maxItems: 4, items: { type: 'STRING' } },

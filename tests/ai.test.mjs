@@ -8,7 +8,9 @@ const PROXY_URL = 'https://test-proxy.example/api/questions';
 const TODAY = '2026-06-10';
 
 function makeQuestion(text = '1 + 1 = ？') {
-  return { type: '計算', q: text, a: '2', opts: ['2', '3', '1', '4'] };
+  // 「計算」題在即時出題必須是純算式；自訂題文的夾具改用「常識」。
+  const type = text === '1 + 1 = ？' ? '計算' : '常識';
+  return { type, q: text, a: '2', opts: ['2', '3', '1', '4'] };
 }
 
 function threeQuestions() {
