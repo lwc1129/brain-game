@@ -216,6 +216,24 @@ class TestDescribeQuestionDefect(unittest.TestCase):
         self.assertEqual(sorted(re.findall(r"'([^']+)'", js_types)), sorted(ALLOWED_TYPES))
 
 
+class TestSharedValidatorCases(unittest.TestCase):
+    """JS／Python 共用驗證案例（tests/fixtures/validator-cases.json）。
+
+    同一份案例也由 tests/logic.test.mjs 對 js/logic.js 的 isValidBankQuestion 斷言，防止兩邊規則漂移。
+    語意：這一題能不能進題庫。
+    """
+
+    def test_shared_cases_match_describe_question_defect(self):
+        from pathlib import Path
+
+        path = Path(__file__).parent / "tests" / "fixtures" / "validator-cases.json"
+        cases = json.loads(path.read_text(encoding="utf-8"))
+        self.assertGreaterEqual(len(cases), 12)
+        for c in cases:
+            with self.subTest(name=c["name"]):
+                self.assertEqual(describe_question_defect(c["question"]) is None, c["valid"])
+
+
 class TestUnseenContent(unittest.TestCase):
     """題文自足性檢查，規則與案例需與 js/logic.js 的 refersToUnseenContent 一致。"""
 
