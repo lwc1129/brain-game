@@ -9,6 +9,13 @@ import {
   shareButtonLabel,
 } from '../js/render/complete.js';
 import { buildStepHtml, STEP_ERROR_MSG } from '../js/render/step.js';
+import {
+  LOADING_MSG_INTERVAL_MS,
+  loadingMessageAt,
+  SLOW_HINT_AFTER_MS,
+  SLOW_HINT_MSG,
+} from '../js/render/loading.js';
+import { FETCH_TIMEOUT_MS } from '../js/ai.js';
 import { MAX_STEPS } from '../js/logic.js';
 
 const data = { steps: 5234, questions: [{}, {}, {}], answers: [], aiGenerated: false };
@@ -81,4 +88,30 @@ test('buildCompleteHtml：確認面板為頁內群組（非 modal），不宣告
   const html = buildCompleteHtml('2026-06-10', data, 3, 35, diff, hist, '🟢 🟢 🟢');
   assert.match(html, /id="retryConfirm" role="group"/);
   assert.ok(!html.includes('alertdialog'));
+});
+
+// ── 載入畫面：等太久時改顯示等待提示 ───────────────────────────────────────
+test('loadingMessageAt：一開始輪播出題訊息，每 LOADING_MSG_INTERVAL_MS 換一句', () => {
+  assert.equal(loadingMessageAt(0), '🤖 AI 正在出題…');
+  assert.equal(loadingMessageAt(LOADING_MSG_INTERVAL_MS), '💭 思考中，請稍候…');
+  assert.equal(loadingMessageAt(LOADING_MSG_INTERVAL_MS * 2), '✨ 快好了…');
+  assert.equal(loadingMessageAt(LOADING_MSG_INTERVAL_MS * 3), '🤖 AI 正在出題…');
+});
+
+test('loadingMessageAt：超過 SLOW_HINT_AFTER_MS 改為固定的等待提示，並說明會改用題庫', () => {
+  assert.notEqual(loadingMessageAt(SLOW_HINT_AFTER_MS - 1), SLOW_HINT_MSG);
+  assert.equal(loadingMessageAt(SLOW_HINT_AFTER_MS), SLOW_HINT_MSG);
+  assert.equal(loadingMessageAt(FETCH_TIMEOUT_MS), SLOW_HINT_MSG);
+  assert.ok(SLOW_HINT_MSG.includes('題庫'));
+});
+
+test('loadingMessageAt：非數字、負數、NaN 視為剛開始', () => {
+  for (const v of [undefined, null, -500, Number.NaN, 'abc']) {
+    assert.equal(loadingMessageAt(v), '🤖 AI 正在出題…');
+  }
+});
+
+test('SLOW_HINT_AFTER_MS：要在前端放棄之前出現，長者才看得到', () => {
+  assert.ok(SLOW_HINT_AFTER_MS > 0);
+  assert.ok(SLOW_HINT_AFTER_MS < FETCH_TIMEOUT_MS);
 });
