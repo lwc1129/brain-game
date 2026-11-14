@@ -328,8 +328,9 @@ export default async function handler(req, res) {
     .map((s) => s.trim())
     .filter(Boolean);
 
-  // 在做任何處理前先驗證 origin，來源不符直接 403 拒絕，
-  // 避免任意第三方消耗 Gemini 配額。
+  // 在做任何處理前先驗證 origin，來源不符直接 403 拒絕。
+  // 這只擋得住「其他網站從瀏覽器呼叫」：非瀏覽器的客戶端可以自行填寫 Origin。
+  // 成本上限靠的是下面的限流、題目快取，以及 Google 端的用量上限。
   const isAllowedOrigin = origin && allowed.includes(origin);
   if (isAllowedOrigin) {
     res.setHeader('Access-Control-Allow-Origin', origin);
