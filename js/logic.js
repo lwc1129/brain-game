@@ -172,8 +172,15 @@ export function revertDailyResult(hist, { today, score }) {
 export function isValidQuestionBank(data) {
   if (!data || typeof data !== 'object' || Array.isArray(data)) return false;
   return DIFFICULTIES.every(
-    (d) => Array.isArray(data[d]) && data[d].length >= MIN_PER_DIFFICULTY && data[d].every(isValidQuestion)
+    (d) => Array.isArray(data[d]) && data[d].length >= MIN_PER_DIFFICULTY && data[d].every(isValidBankQuestion)
   );
+}
+
+// 題庫單題：結構合法、題文不指涉沒看過的內容、純算式不可算錯（非純算式的應用題照收）。
+// 與 generate_questions.py 的 describe_question_defect 一致，由 tests/fixtures/validator-cases.json 兩邊共用鎖住。
+// 不加「計算題必須是純算式」等即時出題專屬規則（見 isValidQuestions），題庫裡的應用題是刻意保留的。
+export function isValidBankQuestion(q) {
+  return isValidQuestion(q) && !refersToUnseenContent(q) && checkArithmeticAnswer(q) !== false;
 }
 
 function isNonEmptyString(v, maxLen) {

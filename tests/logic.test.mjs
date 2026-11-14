@@ -12,6 +12,8 @@ import {
   evaluateArithmetic,
   formatDateKey,
   getDiff,
+  isValidBankQuestion,
+  MIN_PER_DIFFICULTY,
   isValidQuestion,
   isValidQuestionBank,
   isValidQuestions,
@@ -679,3 +681,30 @@ test('settleWithin：promise reject 時視為已完成且無值，不往外丟�
 test('settleWithin：非 promise 值直接視為已完成', async () => {
   assert.deepEqual(await settleWithin('ok', 100), { done: true, value: 'ok' });
 });
+
+// ── JS／Python 共用驗證案例（tests/fixtures/validator-cases.json）──────────
+// 同一份案例也由 test_generate_questions.py 對 describe_question_defect 斷言，防止兩邊規則漂移。
+// 語意：這一題能不能進題庫（isValidQuestionBank 對單題的判斷）。
+{
+  const { readFileSync } = await import('node:fs');
+  const cases = JSON.parse(readFileSync(new URL('./fixtures/validator-cases.json', import.meta.url), 'utf8'));
+
+  test('共用驗證案例：至少涵蓋 12 種情境，且合法與不合法都有', () => {
+    assert.ok(cases.length >= 12);
+    assert.ok(cases.some((c) => c.valid) && cases.some((c) => !c.valid));
+  });
+
+  for (const c of cases) {
+    test(`共用驗證案例（JS）：${c.name} → ${c.valid ? '收' : '不收'}`, () => {
+      assert.equal(isValidBankQuestion(c.question), c.valid);
+    });
+  }
+
+  test('isValidQuestionBank：單題判斷與 isValidBankQuestion 一致（套用到整份題庫）', () => {
+    for (const c of cases) {
+      const pool = Array.from({ length: MIN_PER_DIFFICULTY }, () => c.question);
+      const bank = { hard: pool, medium: pool, easy: pool, super_easy: pool };
+      assert.equal(isValidQuestionBank(bank), c.valid, c.name);
+    }
+  });
+}
