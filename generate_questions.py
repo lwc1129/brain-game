@@ -637,6 +637,7 @@ def merge_question_banks(existing, new):
     return merged
 
 
+# 這裡刻意不設 thinking 與輸出 token 上限，與即時出題路徑（api/questions.js）的差異是有意的。
 def call_gemini(api_key, type_counts=None):
     """呼叫 Gemini API，回傳文字內容。
 
