@@ -3,5 +3,12 @@
     "api/questions.js": {
       "maxDuration": 15
     }
-  }
+  },
+  "redirects": [
+    {
+      "source": "/((?!api/).*)",
+      "destination": "https://lwc1129.github.io/brain-game/",
+      "permanent": false
+    }
+  ]
 }
