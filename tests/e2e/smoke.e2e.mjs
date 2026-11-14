@@ -58,7 +58,9 @@ after(async () => {
 
 // 開一個 iPhone 尺寸的新頁面，記錄 page error、原生對話框與 404。
 // 預設封鎖 service worker，避免它的快取影響其他測試；offline 測試才開啟。
-async function openPage({ bank, serviceWorkers = 'block' } = {}) {
+// aiProxy：選用的假 proxy 處理函式。有傳時改寫 js/config.js 讓 AI_PROXY_URL 指向本機的假網址，
+// 請求交給 aiProxy(route)；全程不發真實網路請求、不用真實 proxy 網址。
+async function openPage({ bank, serviceWorkers = 'block', aiProxy } = {}) {
   const ctx = await browser.newContext({ ...devices['iPhone 13'], serviceWorkers });
   const page = await ctx.newPage();
   const problems = { pageErrors: [], dialogs: [], notFound: [] };
@@ -75,6 +77,15 @@ async function openPage({ bank, serviceWorkers = 'block' } = {}) {
     await ctx.route('**/questions.json', (route) =>
       route.fulfill({ contentType: 'application/json', body: JSON.stringify(bank) })
     );
+  }
+  if (aiProxy) {
+    await ctx.route('**/js/config.js', (route) =>
+      route.fulfill({
+        contentType: 'text/javascript',
+        body: `export const CONFIG = { GA_MEASUREMENT_ID: '', AI_PROXY_URL: '${baseUrl}__fake_proxy' };\nexport const APP_NAMESPACE = 'brain-game';\n`,
+      })
+    );
+    await ctx.route('**/__fake_proxy', aiProxy);
   }
   await page.goto(baseUrl);
   await page.waitForSelector('#si');
@@ -310,6 +321,62 @@ test('e2e [pwa-prune]：新版 sw.js 啟用時，清掉快取中已不在 PRECAC
     const kept = await page.evaluate(async () => !!(await (await caches.open('brain-game-v1')).match('./js/app.js')));
     assert.equal(stale, false, '已不在 PRECACHE 的舊檔應被清除');
     assert.equal(kept, true, 'PRECACHE 內的檔案應保留');
+  } finally {
+    await ctx.close();
+  }
+});
+
+// 三題純算式「計算」題，必須通過 isValidQuestions。假 proxy 立即回應，
+// 遠低於 #65 的 SLOW_HINT_AFTER_MS（6 秒）與 FETCH_TIMEOUT_MS（13 秒），不會出現慢速提示或逾時。
+const FAKE_AI_QUESTIONS = [
+  { type: '計算', q: '3 + 4 = ？', a: '7', opts: ['5', '6', '7', '8'] },
+  { type: '計算', q: '12 - 5 = ？', a: '7', opts: ['6', '7', '8', '9'] },
+  { type: '計算', q: '6 × 3 = ？', a: '18', opts: ['15', '16', '17', '18'] },
+];
+
+test('e2e [ai-success]：AI proxy 回合法三題時顯示 AI 出題並能玩完', async () => {
+  let calls = 0;
+  const { ctx, page, problems } = await openPage({
+    aiProxy: (route) => {
+      calls++;
+      return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ questions: FAKE_AI_QUESTIONS }) });
+    },
+  });
+  try {
+    await page.fill('#si', '4500');
+    await page.click('#startBtn');
+    await page.waitForSelector('.q-text');
+    assert.match(await page.textContent('.q-tag'), /🤖 AI 出題/);
+    const texts = await page.locator('.q-text').allTextContents();
+    assert.deepEqual(texts, FAKE_AI_QUESTIONS.map((q) => q.q));
+    for (let i = 0; i < 3; i++) await page.click(`.q-opt[data-i="${i}"]`);
+    await page.click('#finishBtn');
+    await page.waitForSelector('.share-card');
+    assert.ok(calls >= 1, '假 proxy 沒有被呼叫');
+    assertClean(problems);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test('e2e [ai-fallback]：AI proxy 回 502 時退回題庫出題並能玩完', async () => {
+  let calls = 0;
+  const { ctx, page, problems } = await openPage({
+    aiProxy: (route) => {
+      calls++;
+      return route.fulfill({ status: 502, contentType: 'application/json', body: '{"error":"generation failed"}' });
+    },
+  });
+  try {
+    await page.fill('#si', '4500');
+    await page.click('#startBtn');
+    await page.waitForSelector('.q-text');
+    assert.match(await page.textContent('.q-tag'), /📚 題庫出題/);
+    for (let i = 0; i < 3; i++) await page.click(`.q-opt[data-i="${i}"]`);
+    await page.click('#finishBtn');
+    await page.waitForSelector('.share-card');
+    assert.ok(calls >= 1, '假 proxy 沒有被呼叫');
+    assert.deepEqual(problems.pageErrors, []);
   } finally {
     await ctx.close();
   }
