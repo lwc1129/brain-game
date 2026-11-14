@@ -381,3 +381,39 @@ test('e2e [ai-fallback]：AI proxy 回 502 時退回題庫出題並能玩完', a
     await ctx.close();
   }
 });
+
+test('e2e [slow-network]：載入過一次後，網路很慢時 15 秒內用快取開啟並能玩完', async () => {
+  const { ctx, page, problems } = await openPage({ serviceWorkers: 'allow' });
+  try {
+    const ready = await page.evaluate(() =>
+      Promise.race([
+        navigator.serviceWorker.ready.then(() => true),
+        new Promise((r) => setTimeout(() => r(false), 10000)),
+      ])
+    );
+    assert.ok(ready, 'service worker 未在 10 秒內就緒');
+    await page.reload();
+    await page.waitForFunction(() => navigator.serviceWorker.controller !== null, null, { timeout: 10000 });
+    // 模擬弱訊號：所有本機請求延遲 10 秒才送出（遠大於 sw.js 的 NETWORK_TIMEOUT_MS）。
+    let delayed = 0;
+    await ctx.route(/^http:\/\/127\.0\.0\.1/, async (route) => {
+      delayed++;
+      await new Promise((r) => setTimeout(r, 10000));
+      await route.continue().catch(() => {});
+    });
+    const t0 = Date.now();
+    await page.reload({ waitUntil: 'commit' });
+    // 每個請求在 sw.js 各自等 NETWORK_TIMEOUT_MS（3 秒）才改用快取，模組載入鏈有 4 層，
+    // 所以實測約 12.5 秒（原本的 sw.js 約 40 秒）。
+    await page.waitForSelector('#si', { timeout: 15000 });
+    const elapsed = Date.now() - t0;
+    assert.ok(delayed > 0, 'route 沒有攔到任何請求（攔不到 service worker 發出的請求？）');
+    assert.ok(elapsed < 15000, `花了 ${elapsed}ms 才出現畫面`);
+    await playThrough(page);
+    assert.deepEqual(problems.pageErrors, []);
+    assert.deepEqual(problems.dialogs, []);
+  } finally {
+    await ctx.unrouteAll({ behavior: 'ignoreErrors' }).catch(() => {});
+    await ctx.close();
+  }
+});
