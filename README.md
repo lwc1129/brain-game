@@ -34,7 +34,7 @@ questions.json              動態題庫（GitHub Actions 每週自動擴充）
 
 - **前端與部署產物中沒有任何金鑰。** AI 出題經由 `api/questions.js`
   （Vercel Serverless Function）代理，金鑰存在 Vercel 環境變數，
-  並以 `ALLOWED_ORIGINS` 限制來源（預設只允許本專案的 GitHub Pages）。
+  並以 `ALLOWED_ORIGINS` 限制來源（預設只允許本專案的 GitHub Pages 與自訂網域 `gameofbrain.nocodedaddy.tw`）。
   這個來源檢查只擋其他網站從瀏覽器呼叫，不是身分驗證；成本上限靠限流、題目快取與 Google 端的用量上限。
 - **Rate limiting**：proxy 對每個來源（IP）實施滑動視窗限流（預設：60 秒內最多 30 次），
   於呼叫 Gemini 前先擋，防止 API 配額被洗版。回應帶有
@@ -55,7 +55,7 @@ questions.json              動態題庫（GitHub Actions 每週自動擴充）
    | 環境變數 | 必填 | 說明 |
    |---|---|---|
    | `GEMINI_API_KEY` | 必填 | Google AI Studio API key（使用 `gemini-3.5-flash-lite` 模型） |
-   | `ALLOWED_ORIGINS` | 選填 | 允許的前端來源，逗號分隔；預設 `https://lwc1129.github.io` |
+   | `ALLOWED_ORIGINS` | 選填 | 允許的前端來源，逗號分隔；預設 `https://lwc1129.github.io,https://gameofbrain.nocodedaddy.tw`。有設定時會完全取代預設值 |
    | `RATE_LIMIT_MAX` | 選填 | 單一 IP 於視窗內最多請求數；預設 `30` |
    | `RATE_LIMIT_WINDOW_MS` | 選填 | 限流視窗長度（毫秒）；預設 `60000` |
 
