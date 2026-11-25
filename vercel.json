@@ -7,7 +7,7 @@
   "redirects": [
     {
       "source": "/((?!api/).*)",
-      "destination": "https://lwc1129.github.io/brain-game/",
+      "destination": "https://gameofbrain.nocodedaddy.tw/",
       "permanent": false
     }
   ]

@@ -33,9 +33,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
-      PAGES_URL: https://lwc1129.github.io/brain-game/
-      # 必須在 proxy 的 ALLOWED_ORIGINS 內（預設值即為此來源）。
-      SMOKE_ORIGIN: https://lwc1129.github.io
+      PAGES_URL: https://gameofbrain.nocodedaddy.tw/
+      # 必須在 proxy 的 ALLOWED_ORIGINS 內（預設值已包含此來源）。
+      SMOKE_ORIGIN: https://gameofbrain.nocodedaddy.tw
       SMOKE_MAX_ATTEMPTS: '3'
       SMOKE_SLEEP_SECONDS: '30'
       SMOKE_CURL_MAX_TIME_SECONDS: '20'

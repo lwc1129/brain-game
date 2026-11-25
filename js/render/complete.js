@@ -5,7 +5,7 @@ import { logError } from '../logger.js';
 export const COPY_FEEDBACK_MS = 2000;
 
 // 分享文字附上的網址，與 index.html 的 canonical 一致；家人收到後可直接點開來玩。
-export const SHARE_URL = 'https://lwc1129.github.io/brain-game/';
+export const SHARE_URL = 'https://gameofbrain.nocodedaddy.tw/';
 
 // 支援 Web Share API（多數手機）時直接叫出分享選單（可選 LINE），否則改為複製文字。
 export function shareButtonLabel(canShare) {
