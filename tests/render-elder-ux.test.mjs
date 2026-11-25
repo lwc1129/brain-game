@@ -35,6 +35,21 @@ test('SHARE_URL：與 index.html 的 canonical 網址一致', async () => {
   assert.ok(html.includes(`<link rel="canonical" href="${SHARE_URL}">`));
 });
 
+test('SHARE_URL：與 og:url、og:image、twitter:image 使用同一網域', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
+  assert.ok(html.includes(`<meta property="og:url" content="${SHARE_URL}">`));
+  assert.ok(html.includes(`<meta property="og:image" content="${SHARE_URL}assets/og-image.png">`));
+  assert.ok(html.includes(`<meta name="twitter:image" content="${SHARE_URL}assets/og-image.png">`));
+});
+
+test('SHARE_URL：vercel.json 非 /api/ 路徑導向同一個正式網址', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const cfg = JSON.parse(await readFile(new URL('../vercel.json', import.meta.url), 'utf8'));
+  const dests = cfg.redirects.map((r) => r.destination);
+  assert.deepEqual(dests, [SHARE_URL]);
+});
+
 test('shareButtonLabel：支援系統分享時顯示「分享給家人」，否則顯示「複製」', () => {
   assert.equal(shareButtonLabel(true), '📤 分享給家人');
   assert.equal(shareButtonLabel(false), '📋 複製分享文字');

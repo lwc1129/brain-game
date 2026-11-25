@@ -20,7 +20,7 @@ permissions:
   id-token: write
 
 # 生產題庫驗證用公開 URL（與 repo Pages 設定一致）
-# PRODUCTION_QUESTIONS_URL = https://lwc1129.github.io/brain-game/questions.json
+# PRODUCTION_QUESTIONS_URL = https://gameofbrain.nocodedaddy.tw/questions.json
 # VERIFY_MAX_ATTEMPTS = 12；VERIFY_SLEEP_SECONDS = 10（約 2 分鐘內重試）
 
 jobs:
@@ -134,7 +134,7 @@ jobs:
 
       - name: Verify production questions.json matches repository
         env:
-          PRODUCTION_QUESTIONS_URL: https://lwc1129.github.io/brain-game/questions.json
+          PRODUCTION_QUESTIONS_URL: https://gameofbrain.nocodedaddy.tw/questions.json
           VERIFY_MAX_ATTEMPTS: '12'
           VERIFY_SLEEP_SECONDS: '10'
         run: |
