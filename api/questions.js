@@ -5,7 +5,8 @@
 //
 // Vercel 專案 Settings → Environment Variables：
 //  - GEMINI_API_KEY（必填）：Google AI Studio API key
-//  - ALLOWED_ORIGINS（選填）：允許的前端來源，逗號分隔；預設為 GitHub Pages 網址
+//  - ALLOWED_ORIGINS（選填）：允許的前端來源，逗號分隔；預設為 GitHub Pages 與自訂網域
+//    注意：一旦設定就會完全取代預設值，新增網域時要一併加進去
 //  - RATE_LIMIT_MAX（選填）：單一來源於視窗內允許的請求數；預設 30
 //  - RATE_LIMIT_WINDOW_MS（選填）：限流視窗長度（毫秒）；預設 60000
 
@@ -23,7 +24,11 @@ const MODEL_NAME = 'gemini-3.5-flash-lite';
 // 該模型本身的預設值）並放寬上限。Gemini 3 系列已棄用 thinkingBudget，帶上會回
 // 400 INVALID_ARGUMENT，故改用 thinkingLevel。
 export const GEMINI_MAX_OUTPUT_TOKENS = 1024;
-const DEFAULT_ALLOWED_ORIGINS = 'https://lwc1129.github.io';
+// 自訂網域 gameofbrain.nocodedaddy.tw 與原本的 GitHub Pages 並存：
+// 換網域期間舊網址仍在服務（GitHub 會轉址，但已開著的分頁、已安裝的 PWA 仍從舊來源呼叫），
+// 確認沒有流量後再移除 lwc1129.github.io。
+// 比對是完整字串相等，所以 http://、多一個結尾斜線、或 *.nocodedaddy.tw.evil.example 都不會通過。
+const DEFAULT_ALLOWED_ORIGINS = 'https://lwc1129.github.io,https://gameofbrain.nocodedaddy.tw';
 
 // 預設限流：每個來源 60 秒內最多 30 次。可由環境變數覆寫。
 const DEFAULT_RATE_LIMIT_MAX = 30;

@@ -298,6 +298,32 @@ test('handler：CORS 允許清單命中時回傳該來源', async () => {
   assert.equal(res.headers['access-control-allow-origin'], 'https://lwc1129.github.io');
 });
 
+test('handler：自訂網域 gameofbrain.nocodedaddy.tw 在預設白名單內', async () => {
+  const req = makeReq({ method: 'OPTIONS', origin: 'https://gameofbrain.nocodedaddy.tw', ip: freshIp() });
+  const res = makeRes();
+  await handler(req, res);
+  assert.notEqual(res.statusCode, 403);
+  assert.equal(res.headers['access-control-allow-origin'], 'https://gameofbrain.nocodedaddy.tw');
+});
+
+test('handler：自訂網域的近似來源一律拒絕（必須完整相等）', async () => {
+  const lookalikes = [
+    'http://gameofbrain.nocodedaddy.tw',
+    'https://gameofbrain.nocodedaddy.tw/',
+    'https://gameofbrain.nocodedaddy.tw.evil.example',
+    'https://evil.gameofbrain.nocodedaddy.tw',
+    'https://nocodedaddy.tw',
+    'https://gameofbrain.nocodedaddy.tw:8443',
+  ];
+  for (const origin of lookalikes) {
+    const req = makeReq({ method: 'OPTIONS', origin, ip: freshIp() });
+    const res = makeRes();
+    await handler(req, res);
+    assert.equal(res.statusCode, 403, origin);
+    assert.equal(res.headers['access-control-allow-origin'], undefined, origin);
+  }
+});
+
 test('handler：CORS 來源不在白名單時回 403 且不設 CORS header', async () => {
   const req = makeReq({ method: 'OPTIONS', origin: 'https://evil.example', ip: freshIp() });
   const res = makeRes();
