@@ -43,3 +43,9 @@
 - 測試閘門只擋 GitHub Pages。Vercel 的 API 在合併後一律自動部署，不看測試結果。
 - 沒有 AI 自動審查 PR 的 workflow。
 - CI 不測真實 Gemini、真實手機、PWA 安裝。
+
+## poteto-mode 批次授權與紅線（摘要，詳見 Notion Agent Operating Guide）
+- 批次授權：使用者核准「特定 Spec ＋ 特定 feature/* 分支 ＋ 目標 Repo」後，該分支內的檔案讀寫、測試與本地 git commit 視為已授權，免逐動 Preflight。
+- sub-agents 視為同一 Implementation Agent 的臨時子工作緒。
+- 不可豁免（必須停下取得人工核准）：push／merge 到 main、修改 .env 或金鑰、動 Supabase 正式資料、Production 部署、對外發信或付費。
+- grill-me／to-spec／poteto-mode 迴圈期間，暫時免「單一唯一下一步」與 SOP-32 執行卡；規格產出或完工交付驗收時恢復。
